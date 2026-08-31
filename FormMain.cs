@@ -86,7 +86,7 @@ namespace CanXeApp
 
         private void InitializeComponentCustom()
         {
-            this.Text = "HỆ THỐNG QUẢN LÝ TRẠM CÂN XE - TRẠM CÂN THỊ TRẤN HAI RIÊNG";
+            this.Text = "Cân Xe - TRẠM CÂN THỊ TRẤN HAI RIÊNG";
             this.Size = new Size(1300, 750);
             this.MinimumSize = new Size(1100, 650);
             this.StartPosition = FormStartPosition.CenterScreen;
