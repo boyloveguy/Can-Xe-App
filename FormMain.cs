@@ -95,6 +95,14 @@ namespace CanXeApp
 
             this.Click += ClearFocus_Click;
 
+            try
+            {
+                if (File.Exists("app_icon.ico")) this.Icon = new Icon("app_icon.ico");
+                else if (File.Exists("app_icon.png")) this.Icon = Icon.FromHandle(((Bitmap)Image.FromFile("app_icon.png")).GetHicon());
+                else this.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            }
+            catch { }
+
             // 1. Header (Top Dock)
             panelHeader = new Panel
             {

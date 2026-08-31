@@ -60,6 +60,14 @@ namespace CanXeApp
 
             this.Click += ClearFocus_Click;
 
+            try
+            {
+                if (System.IO.File.Exists("app_icon.ico")) this.Icon = new Icon("app_icon.ico");
+                else if (System.IO.File.Exists("app_icon.png")) this.Icon = Icon.FromHandle(((Bitmap)Image.FromFile("app_icon.png")).GetHicon());
+                else this.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            }
+            catch { }
+
             int y = 20;
             int lblX1 = 20, txtX1 = 130, txtWidth1 = 180;
             int lblX2 = 345, txtX2 = 460, txtWidth2 = 220;
