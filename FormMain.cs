@@ -54,6 +54,11 @@ namespace CanXeApp
         private Label lblFilterTo;
 
         private DataGridView dgvPhieuCan;
+        private Button btnPrintSelected;
+        private readonly HashSet<long> _selectedPhieuIds = new HashSet<long>();
+        private ToolTip? _actionToolTip;
+        private int _lastHoveredRow = -1;
+        private string _lastHoveredBtn = "";
 
         // ContextMenuStrip cho danh sách phiếu cân
         private ContextMenuStrip contextMenuDgv;
@@ -302,7 +307,7 @@ namespace CanXeApp
             panelSearch.Click += ClearFocus_Click;
 
             lblSearch = CreateLabel("Từ khóa:", 5, 10);
-            txtSearch = new TextBox { Location = new Point(70, 7), Width = 180, Font = new Font("Segoe UI", 9.5F, FontStyle.Regular), PlaceholderText = "Số xe, Loại hàng, Khách hàng..." };
+            txtSearch = new TextBox { Location = new Point(65, 7), Width = 135, Font = new Font("Segoe UI", 9.5F, FontStyle.Regular), PlaceholderText = "Số xe, hàng..." };
             txtSearch.Enter += Input_SelectAllOnEnter;
             txtSearch.MouseClick += Input_SelectAllOnEnter;
 
@@ -320,16 +325,16 @@ namespace CanXeApp
 
             chkFilterDate = new CheckBox
             {
-                Text = "Lọc theo ngày:",
-                Location = new Point(265, 9),
+                Text = "Lọc ngày:",
+                Location = new Point(208, 9),
                 AutoSize = true,
                 Checked = false
             };
 
             dtpFilterFrom = new VnDateTimePicker
             {
-                Location = new Point(390, 6),
-                Width = 120,
+                Location = new Point(292, 6),
+                Width = 110,
                 CustomFormat = "dd/MM/yyyy",
                 Enabled = false,
                 PreventFutureDates = true,
@@ -337,12 +342,12 @@ namespace CanXeApp
                 Language = _currentLanguage
             };
 
-            lblFilterTo = CreateLabel("đến", 518, 10);
+            lblFilterTo = CreateLabel("đến", 406, 10);
 
             dtpFilterTo = new VnDateTimePicker
             {
-                Location = new Point(548, 6),
-                Width = 120,
+                Location = new Point(436, 6),
+                Width = 110,
                 CustomFormat = "dd/MM/yyyy",
                 Enabled = false,
                 PreventFutureDates = true,
@@ -350,8 +355,22 @@ namespace CanXeApp
                 Language = _currentLanguage
             };
 
-            btnSearch = CreateButton("🔍 Tìm kiếm", 678, 5, 110, Color.FromArgb(108, 117, 125));
+            btnSearch = CreateButton("🔍 Tìm kiếm", 552, 5, 95, Color.FromArgb(108, 117, 125));
             btnSearch.Height = 30;
+
+            btnPrintSelected = new Button
+            {
+                Location = new Point(panelSearch.Width - 170, 5),
+                Size = new Size(160, 31),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
+                Cursor = Cursors.Default,
+                Enabled = false
+            };
+            btnPrintSelected.FlatAppearance.BorderSize = 0;
+            btnPrintSelected.Click += BtnPrintSelected_Click;
+            UpdatePrintSelectedButtonState();
 
             chkFilterDate.CheckedChanged += (s, e) =>
             {
@@ -366,11 +385,14 @@ namespace CanXeApp
             panelSearch.Controls.Add(lblFilterTo);
             panelSearch.Controls.Add(dtpFilterTo);
             panelSearch.Controls.Add(btnSearch);
+            panelSearch.Controls.Add(btnPrintSelected);
+
+            _actionToolTip = new ToolTip { InitialDelay = 100, ReshowDelay = 100 };
 
             dgvPhieuCan = new DataGridView
             {
                 Dock = DockStyle.Fill,
-                ReadOnly = true,
+                ReadOnly = false,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 MultiSelect = false,
                 AllowUserToAddRows = false,
@@ -378,9 +400,32 @@ namespace CanXeApp
                 BackgroundColor = Color.White,
                 ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.EnableResizing,
                 ColumnHeadersHeight = 34,
-                RowTemplate = { Height = 28 },
-                AlternatingRowsDefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.FromArgb(240, 245, 255) }
+                RowTemplate = { Height = 32 },
+                RowHeadersVisible = false,
+                BorderStyle = BorderStyle.None,
+                CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
+                GridColor = Color.FromArgb(235, 238, 242)
             };
+
+            // Bỏ focus row màu xanh: gán màu selection trùng với màu nền dòng bình thường
+            dgvPhieuCan.DefaultCellStyle.SelectionBackColor = Color.White;
+            dgvPhieuCan.DefaultCellStyle.SelectionForeColor = Color.FromArgb(30, 40, 60);
+            dgvPhieuCan.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(246, 249, 254);
+            dgvPhieuCan.AlternatingRowsDefaultCellStyle.SelectionBackColor = Color.FromArgb(246, 249, 254);
+            dgvPhieuCan.AlternatingRowsDefaultCellStyle.SelectionForeColor = Color.FromArgb(30, 40, 60);
+            dgvPhieuCan.RowHeadersDefaultCellStyle.SelectionBackColor = Color.White;
+            dgvPhieuCan.RowHeadersDefaultCellStyle.SelectionForeColor = Color.FromArgb(30, 40, 60);
+
+            dgvPhieuCan.SelectionChanged += (s, e) => dgvPhieuCan.ClearSelection();
+            dgvPhieuCan.DataBindingComplete += (s, e) => dgvPhieuCan.ClearSelection();
+            dgvPhieuCan.CurrentCellDirtyStateChanged += DgvPhieuCan_CurrentCellDirtyStateChanged;
+            dgvPhieuCan.CellValueChanged += DgvPhieuCan_CellValueChanged;
+            dgvPhieuCan.CellPainting += DgvPhieuCan_CellPainting;
+            dgvPhieuCan.CellMouseClick += DgvPhieuCan_CellMouseClick;
+            dgvPhieuCan.CellMouseMove += DgvPhieuCan_CellMouseMove;
+            dgvPhieuCan.CellMouseLeave += DgvPhieuCan_CellMouseLeave;
+            dgvPhieuCan.ColumnHeaderMouseClick += DgvPhieuCan_ColumnHeaderMouseClick;
+            dgvPhieuCan.CellMouseDown += DgvPhieuCan_CellMouseDown;
 
             contextMenuDgv = new ContextMenuStrip();
             menuItemEdit = new ToolStripMenuItem("✏️ Chỉnh sửa phiếu này", null, (s, e) => OpenEditModal());
@@ -391,7 +436,14 @@ namespace CanXeApp
 
             dgvPhieuCan.CellDoubleClick += (s, e) =>
             {
-                if (e.RowIndex >= 0) OpenEditModal();
+                if (e.RowIndex >= 0 && e.ColumnIndex >= 0)
+                {
+                    string colName = dgvPhieuCan.Columns[e.ColumnIndex].Name;
+                    if (colName != "colAction" && colName != "colSelect")
+                    {
+                        OpenEditModal();
+                    }
+                }
             };
 
             panelRight.Controls.Add(dgvPhieuCan);
@@ -499,6 +551,7 @@ namespace CanXeApp
                 if (selKieuCan >= 0 && selKieuCan < cbKieuCan.Items.Count) cbKieuCan.SelectedIndex = selKieuCan;
             }
 
+            UpdatePrintSelectedButtonState();
             LoadDataWithFilter();
         }
 
@@ -648,6 +701,8 @@ namespace CanXeApp
             var list = _dbService.GetAllPhieuCan(keyword, fromDate, toDate);
             dgvPhieuCan.DataSource = list;
 
+            EnsureCustomColumns();
+
             if (dgvPhieuCan.Columns["Id"] != null) dgvPhieuCan.Columns["Id"].Visible = false;
             if (dgvPhieuCan.Columns["TramCanName"] != null) dgvPhieuCan.Columns["TramCanName"].Visible = false;
             if (dgvPhieuCan.Columns["TramCanAddress"] != null) dgvPhieuCan.Columns["TramCanAddress"].Visible = false;
@@ -662,14 +717,18 @@ namespace CanXeApp
 
             foreach (DataGridViewColumn col in dgvPhieuCan.Columns)
             {
-                col.SortMode = DataGridViewColumnSortMode.Automatic;
+                if (col.Name != "colSelect")
+                {
+                    col.ReadOnly = true;
+                    col.SortMode = DataGridViewColumnSortMode.Automatic;
+                }
             }
 
             if (dgvPhieuCan.Columns["STT"] != null)
             {
                 dgvPhieuCan.Columns["STT"].HeaderText = _currentLanguage == "EN" ? "No" : "STT";
                 dgvPhieuCan.Columns["STT"].AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
-                dgvPhieuCan.Columns["STT"].Width = 60;
+                dgvPhieuCan.Columns["STT"].Width = 55;
             }
 
             if (dgvPhieuCan.Columns["SoXe"] != null) dgvPhieuCan.Columns["SoXe"].HeaderText = _currentLanguage == "EN" ? "Plate No" : "Số xe";
@@ -702,6 +761,326 @@ namespace CanXeApp
                 dgvPhieuCan.Columns["NgayInPhieu"].HeaderText = _currentLanguage == "EN" ? "Ticket Date" : "Ngày in phiếu";
                 dgvPhieuCan.Columns["NgayInPhieu"].DefaultCellStyle.Format = "dd/MM/yyyy HH:mm";
             }
+
+            // Đồng bộ trạng thái checkbox từ _selectedPhieuIds
+            foreach (DataGridViewRow row in dgvPhieuCan.Rows)
+            {
+                if (row.DataBoundItem is PhieuCan item)
+                {
+                    row.Cells["colSelect"].Value = _selectedPhieuIds.Contains(item.Id);
+                }
+            }
+
+            UpdatePrintSelectedButtonState();
+            dgvPhieuCan.ClearSelection();
+        }
+
+        private void EnsureCustomColumns()
+        {
+            if (!dgvPhieuCan.Columns.Contains("colSelect"))
+            {
+                var colSelect = new DataGridViewCheckBoxColumn
+                {
+                    Name = "colSelect",
+                    HeaderText = "",
+                    Width = 36,
+                    AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
+                    Resizable = DataGridViewTriState.False,
+                    ReadOnly = false
+                };
+                dgvPhieuCan.Columns.Insert(0, colSelect);
+            }
+            dgvPhieuCan.Columns["colSelect"].DisplayIndex = 0;
+
+            if (!dgvPhieuCan.Columns.Contains("colAction"))
+            {
+                var colAction = new DataGridViewTextBoxColumn
+                {
+                    Name = "colAction",
+                    HeaderText = "",
+                    Width = 115,
+                    AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
+                    Resizable = DataGridViewTriState.False,
+                    ReadOnly = true
+                };
+                dgvPhieuCan.Columns.Add(colAction);
+            }
+            dgvPhieuCan.Columns["colAction"].DisplayIndex = dgvPhieuCan.Columns.Count - 1;
+            dgvPhieuCan.Columns["colAction"].HeaderText = "";
+        }
+
+        private void UpdatePrintSelectedButtonState()
+        {
+            if (btnPrintSelected == null) return;
+
+            int count = _selectedPhieuIds.Count;
+            if (count == 0)
+            {
+                btnPrintSelected.Enabled = false;
+                btnPrintSelected.BackColor = Color.FromArgb(220, 224, 230);
+                btnPrintSelected.ForeColor = Color.FromArgb(135, 140, 145);
+                btnPrintSelected.Cursor = Cursors.Default;
+                btnPrintSelected.Text = _currentLanguage == "EN" ? "🖨️ Print Selected" : "🖨️ In phiếu đã chọn";
+            }
+            else
+            {
+                btnPrintSelected.Enabled = true;
+                btnPrintSelected.BackColor = Color.FromArgb(40, 167, 69);
+                btnPrintSelected.ForeColor = Color.White;
+                btnPrintSelected.Cursor = Cursors.Hand;
+                btnPrintSelected.Text = _currentLanguage == "EN" ? $"🖨️ Print ({count})" : $"🖨️ In đã chọn ({count})";
+            }
+        }
+
+        private void BtnPrintSelected_Click(object? sender, EventArgs e)
+        {
+            if (_selectedPhieuIds.Count == 0) return;
+
+            var allTickets = _dbService.GetAllPhieuCan();
+            var selectedList = allTickets.Where(p => _selectedPhieuIds.Contains(p.Id)).OrderBy(p => p.STT).ToList();
+
+            if (selectedList.Count == 0) return;
+
+            string confirmMsg = _currentLanguage == "EN"
+                ? $"Do you want to print {selectedList.Count} selected ticket(s)?"
+                : $"Bạn có chắc chắn muốn in {selectedList.Count} phiếu cân đã chọn không?";
+            string confirmTitle = _currentLanguage == "EN" ? "Print Confirmation" : "Xác nhận in phiếu";
+
+            if (CustomMessageBox.Show(confirmMsg, confirmTitle, MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+            {
+                using (PrintDialog printDialog = new PrintDialog())
+                {
+                    if (printDialog.ShowDialog(this) == DialogResult.OK)
+                    {
+                        foreach (var ticket in selectedList)
+                        {
+                            PrintService ps = new PrintService(ticket);
+                            ps.PrintToPrinter(printDialog.PrinterSettings);
+                        }
+
+                        string successMsg = _currentLanguage == "EN"
+                            ? $"Sent {selectedList.Count} ticket(s) to printer successfully!"
+                            : $"Đã gửi {selectedList.Count} phiếu cân đến máy in thành công!";
+                        MessageBox.Show(successMsg, _currentLanguage == "EN" ? "Success" : "Thành công", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                }
+            }
+        }
+
+        private void DgvPhieuCan_CurrentCellDirtyStateChanged(object? sender, EventArgs e)
+        {
+            if (dgvPhieuCan.IsCurrentCellDirty && dgvPhieuCan.CurrentCell is DataGridViewCheckBoxCell)
+            {
+                dgvPhieuCan.CommitEdit(DataGridViewDataErrorContexts.Commit);
+            }
+        }
+
+        private void DgvPhieuCan_CellValueChanged(object? sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex >= 0 && e.ColumnIndex >= 0 && dgvPhieuCan.Columns[e.ColumnIndex].Name == "colSelect")
+            {
+                if (dgvPhieuCan.Rows[e.RowIndex].DataBoundItem is PhieuCan item)
+                {
+                    bool isChecked = Convert.ToBoolean(dgvPhieuCan.Rows[e.RowIndex].Cells["colSelect"].Value);
+                    if (isChecked) _selectedPhieuIds.Add(item.Id);
+                    else _selectedPhieuIds.Remove(item.Id);
+
+                    dgvPhieuCan.InvalidateCell(dgvPhieuCan.Columns["colSelect"].HeaderCell);
+                    UpdatePrintSelectedButtonState();
+                }
+            }
+        }
+
+        private void DgvPhieuCan_ColumnHeaderMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.ColumnIndex >= 0 && dgvPhieuCan.Columns[e.ColumnIndex].Name == "colSelect")
+            {
+                bool allChecked = dgvPhieuCan.Rows.Count > 0 &&
+                    dgvPhieuCan.Rows.Cast<DataGridViewRow>().All(r => Convert.ToBoolean(r.Cells["colSelect"].Value));
+
+                bool targetState = !allChecked;
+
+                foreach (DataGridViewRow row in dgvPhieuCan.Rows)
+                {
+                    row.Cells["colSelect"].Value = targetState;
+                    if (row.DataBoundItem is PhieuCan item)
+                    {
+                        if (targetState) _selectedPhieuIds.Add(item.Id);
+                        else _selectedPhieuIds.Remove(item.Id);
+                    }
+                }
+
+                dgvPhieuCan.Invalidate();
+                UpdatePrintSelectedButtonState();
+            }
+        }
+
+        private void DgvPhieuCan_CellMouseDown(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Right && e.RowIndex >= 0)
+            {
+                dgvPhieuCan.CurrentCell = dgvPhieuCan.Rows[e.RowIndex].Cells[e.ColumnIndex >= 0 ? e.ColumnIndex : 1];
+            }
+        }
+
+        private void DgvPhieuCan_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
+        {
+            // 1. Vẽ Checkbox Chọn tất cả ở Header
+            if (e.RowIndex == -1 && e.ColumnIndex >= 0 && dgvPhieuCan.Columns[e.ColumnIndex].Name == "colSelect")
+            {
+                e.PaintBackground(e.CellBounds, true);
+                int cbSize = 14;
+                int cbX = e.CellBounds.X + (e.CellBounds.Width - cbSize) / 2;
+                int cbY = e.CellBounds.Y + (e.CellBounds.Height - cbSize) / 2;
+                Rectangle cbRect = new Rectangle(cbX, cbY, cbSize, cbSize);
+
+                bool allChecked = dgvPhieuCan.Rows.Count > 0 &&
+                    dgvPhieuCan.Rows.Cast<DataGridViewRow>().All(r => Convert.ToBoolean(r.Cells["colSelect"].Value));
+
+                ButtonState state = allChecked ? ButtonState.Checked : ButtonState.Normal;
+                ControlPaint.DrawCheckBox(e.Graphics, cbRect, state);
+
+                e.Handled = true;
+                return;
+            }
+
+            // 2. Vẽ 3 nút icon (Xem trước, Sửa, In) ở cột Action
+            if (e.RowIndex >= 0 && e.ColumnIndex >= 0 && dgvPhieuCan.Columns[e.ColumnIndex].Name == "colAction")
+            {
+                e.PaintBackground(e.CellBounds, true);
+
+                int btnW = 28;
+                int btnH = 22;
+                int gap = 5;
+                int startX = e.CellBounds.X + (e.CellBounds.Width - (btnW * 3 + gap * 2)) / 2;
+                int startY = e.CellBounds.Y + (e.CellBounds.Height - btnH) / 2;
+
+                Rectangle rcPreview = new Rectangle(startX, startY, btnW, btnH);
+                Rectangle rcEdit = new Rectangle(startX + btnW + gap, startY, btnW, btnH);
+                Rectangle rcPrint = new Rectangle(startX + (btnW + gap) * 2, startY, btnW, btnH);
+
+                DrawActionBtn(e.Graphics, rcPreview, "👁️", Color.FromArgb(232, 244, 253), Color.FromArgb(145, 202, 255));
+                DrawActionBtn(e.Graphics, rcEdit, "✏️", Color.FromArgb(254, 244, 230), Color.FromArgb(254, 215, 170));
+                DrawActionBtn(e.Graphics, rcPrint, "🖨️", Color.FromArgb(235, 247, 238), Color.FromArgb(163, 230, 185));
+
+                e.Handled = true;
+                return;
+            }
+        }
+
+        private void DrawActionBtn(Graphics g, Rectangle rect, string icon, Color bg, Color border)
+        {
+            using var brushBg = new SolidBrush(bg);
+            using var penBorder = new Pen(border);
+            g.FillRectangle(brushBg, rect);
+            g.DrawRectangle(penBorder, rect);
+
+            using var font = new Font("Segoe UI Emoji", 9F, FontStyle.Regular);
+            using var sf = new StringFormat
+            {
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center
+            };
+            g.DrawString(icon, font, Brushes.Black, rect, sf);
+        }
+
+        private void DgvPhieuCan_CellMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.RowIndex >= 0 && e.ColumnIndex >= 0 && dgvPhieuCan.Columns[e.ColumnIndex].Name == "colAction")
+            {
+                if (dgvPhieuCan.Rows[e.RowIndex].DataBoundItem is PhieuCan item)
+                {
+                    Rectangle cellBounds = dgvPhieuCan.GetCellDisplayRectangle(e.ColumnIndex, e.RowIndex, false);
+                    int btnW = 28;
+                    int btnH = 22;
+                    int gap = 5;
+                    int startX = (cellBounds.Width - (btnW * 3 + gap * 2)) / 2;
+                    int startY = (cellBounds.Height - btnH) / 2;
+
+                    Rectangle rcPreview = new Rectangle(startX, startY, btnW, btnH);
+                    Rectangle rcEdit = new Rectangle(startX + btnW + gap, startY, btnW, btnH);
+                    Rectangle rcPrint = new Rectangle(startX + (btnW + gap) * 2, startY, btnW, btnH);
+
+                    if (rcPreview.Contains(e.X, e.Y))
+                    {
+                        PrintService ps = new PrintService(item);
+                        ps.PrintPreview();
+                    }
+                    else if (rcEdit.Contains(e.X, e.Y))
+                    {
+                        OpenEditModal(item);
+                    }
+                    else if (rcPrint.Contains(e.X, e.Y))
+                    {
+                        PrintService ps = new PrintService(item);
+                        ps.PrintDirect();
+                    }
+                }
+            }
+        }
+
+        private void DgvPhieuCan_CellMouseMove(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.RowIndex >= 0 && e.ColumnIndex >= 0 && dgvPhieuCan.Columns[e.ColumnIndex].Name == "colAction")
+            {
+                Rectangle cellBounds = dgvPhieuCan.GetCellDisplayRectangle(e.ColumnIndex, e.RowIndex, false);
+                int btnW = 28;
+                int btnH = 22;
+                int gap = 5;
+                int startX = (cellBounds.Width - (btnW * 3 + gap * 2)) / 2;
+                int startY = (cellBounds.Height - btnH) / 2;
+
+                Rectangle rcPreview = new Rectangle(startX, startY, btnW, btnH);
+                Rectangle rcEdit = new Rectangle(startX + btnW + gap, startY, btnW, btnH);
+                Rectangle rcPrint = new Rectangle(startX + (btnW + gap) * 2, startY, btnW, btnH);
+
+                string btn = "";
+                string tip = "";
+                if (rcPreview.Contains(e.X, e.Y))
+                {
+                    btn = "preview";
+                    tip = _currentLanguage == "EN" ? "Preview Ticket" : "Xem trước phiếu";
+                }
+                else if (rcEdit.Contains(e.X, e.Y))
+                {
+                    btn = "edit";
+                    tip = _currentLanguage == "EN" ? "Edit Ticket" : "Chỉnh sửa phiếu";
+                }
+                else if (rcPrint.Contains(e.X, e.Y))
+                {
+                    btn = "print";
+                    tip = _currentLanguage == "EN" ? "Print Ticket" : "In phiếu cân";
+                }
+
+                if (!string.IsNullOrEmpty(btn))
+                {
+                    dgvPhieuCan.Cursor = Cursors.Hand;
+                    if (_lastHoveredRow != e.RowIndex || _lastHoveredBtn != btn)
+                    {
+                        _lastHoveredRow = e.RowIndex;
+                        _lastHoveredBtn = btn;
+                        _actionToolTip?.Show(tip, dgvPhieuCan, cellBounds.Left + e.X, cellBounds.Top + e.Y - 22, 1500);
+                    }
+                }
+                else
+                {
+                    dgvPhieuCan.Cursor = Cursors.Default;
+                    _actionToolTip?.Hide(dgvPhieuCan);
+                    _lastHoveredBtn = "";
+                }
+            }
+            else
+            {
+                dgvPhieuCan.Cursor = Cursors.Default;
+            }
+        }
+
+        private void DgvPhieuCan_CellMouseLeave(object? sender, DataGridViewCellEventArgs e)
+        {
+            _actionToolTip?.Hide(dgvPhieuCan);
+            _lastHoveredRow = -1;
+            _lastHoveredBtn = "";
+            dgvPhieuCan.Cursor = Cursors.Default;
         }
 
         private void GetInputData()
@@ -758,9 +1137,14 @@ namespace CanXeApp
             ps.PrintPreview();
         }
 
-        private void OpenEditModal()
+        private void OpenEditModal(PhieuCan? item = null)
         {
-            if (dgvPhieuCan.CurrentRow != null && dgvPhieuCan.CurrentRow.DataBoundItem is PhieuCan item)
+            if (item == null && dgvPhieuCan.CurrentRow != null && dgvPhieuCan.CurrentRow.DataBoundItem is PhieuCan curr)
+            {
+                item = curr;
+            }
+
+            if (item != null)
             {
                 FormEditPhieu editForm = new FormEditPhieu(item, _currentLanguage);
                 if (editForm.ShowDialog(this) == DialogResult.OK)
@@ -768,6 +1152,7 @@ namespace CanXeApp
                     if (editForm.IsDeleted)
                     {
                         _dbService.DeletePhieuCan(item.Id);
+                        _selectedPhieuIds.Remove(item.Id);
                     }
                     else
                     {
@@ -793,6 +1178,7 @@ namespace CanXeApp
                 if (confirm == DialogResult.Yes)
                 {
                     _dbService.DeletePhieuCan(item.Id);
+                    _selectedPhieuIds.Remove(item.Id);
                     LoadDataWithFilter();
                 }
             }

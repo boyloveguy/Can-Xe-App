@@ -44,6 +44,14 @@ namespace CanXeApp.Services
             }
         }
 
+        public void PrintToPrinter(PrinterSettings settings)
+        {
+            PrintDocument pd = new PrintDocument();
+            pd.PrinterSettings = settings;
+            pd.PrintPage += Pd_PrintPage;
+            pd.Print();
+        }
+
         private void Pd_PrintPage(object sender, PrintPageEventArgs e)
         {
             Graphics g = e.Graphics;
