@@ -1675,25 +1675,12 @@ namespace CanXeApp
                 };
 
                 FormEditPhieu editForm = new FormEditPhieu(cloneItem, _currentLanguage, _currentZoom, _dbService);
-                if (editForm.ShowDialog(this) == DialogResult.OK)
+                var dialogResult = editForm.ShowDialog(this);
+                if (dialogResult == DialogResult.OK || editForm.HasSavedChanges)
                 {
                     if (editForm.IsDeleted)
                     {
-                        _dbService.DeletePhieuCan(item.Id);
                         _selectedPhieuIds.Remove(item.Id);
-                    }
-                    else
-                    {
-                        _dbService.SavePhieuCan(editForm.PhieuCanData);
-                        if (editForm.RecordedHistory != null)
-                        {
-                            _dbService.AddPhieuCanHistory(editForm.RecordedHistory);
-                        }
-                        if (editForm.IsPrintRequested)
-                        {
-                            PrintService ps = new PrintService(editForm.PhieuCanData);
-                            ps.PrintDirect();
-                        }
                     }
                     LoadDataWithFilter();
                 }

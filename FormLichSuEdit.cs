@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Text.Json;
@@ -41,8 +41,8 @@ namespace CanXeApp
 
         private void InitializeComponentCustom()
         {
-            int w = (int)Math.Round(820 * _zoom);
-            int h = (int)Math.Round(560 * _zoom);
+            int w = (int)Math.Round(1100 * _zoom);
+            int h = (int)Math.Round(580 * _zoom);
             this.ClientSize = new Size(w, h);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -163,25 +163,25 @@ namespace CanXeApp
             {
                 Name = "ColLan",
                 HeaderText = _language == "EN" ? "No." : "Lần",
-                FillWeight = 12
+                FillWeight = 8
             });
             dgvHistory.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "ColThoiGian",
                 HeaderText = _language == "EN" ? "Edit Time" : "Thời gian sửa",
-                FillWeight = 26
+                FillWeight = 18
             });
             dgvHistory.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "ColNguoiSua",
                 HeaderText = _language == "EN" ? "User / Operator" : "Người sửa",
-                FillWeight = 20
+                FillWeight = 14
             });
             dgvHistory.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "ColNoiDung",
                 HeaderText = _language == "EN" ? "Summary of Changes" : "Tóm tắt thay đổi",
-                FillWeight = 42
+                FillWeight = 60
             });
 
             dgvHistory.SelectionChanged += DgvHistory_SelectionChanged;
@@ -220,30 +220,33 @@ namespace CanXeApp
             dgvDetails.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", Math.Max(8.5f, 9.5F * _zoom), FontStyle.Bold);
             dgvDetails.ColumnHeadersHeight = (int)Math.Round(32 * _zoom);
             dgvDetails.RowTemplate.Height = (int)Math.Round(28 * _zoom);
+            dgvDetails.DefaultCellStyle.SelectionBackColor = Color.White;
+            dgvDetails.DefaultCellStyle.SelectionForeColor = Color.Black;
+            dgvDetails.SelectionChanged += (s, e) => dgvDetails.ClearSelection();
 
             dgvDetails.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "ColTruong",
                 HeaderText = _language == "EN" ? "Field" : "Thông tin / Trường",
-                FillWeight = 26
+                FillWeight = 22
             });
             dgvDetails.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "ColCu",
                 HeaderText = _language == "EN" ? "Before Edit (Old)" : "Trước khi sửa (Cũ)",
-                FillWeight = 32
+                FillWeight = 34
             });
             dgvDetails.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "ColMoi",
                 HeaderText = _language == "EN" ? "After Edit (New)" : "Sau khi sửa (Mới)",
-                FillWeight = 32
+                FillWeight = 34
             });
             dgvDetails.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "ColTrangThai",
                 HeaderText = _language == "EN" ? "Status" : "Trạng thái",
-                FillWeight = 18
+                FillWeight = 16
             });
 
             // Add controls (order matters for DockStyle)
@@ -263,6 +266,8 @@ namespace CanXeApp
             try
             {
                 _historyList = _dbService.GetHistoryByPhieuCanId(_phieuCanId);
+                // Sắp xếp các lần chỉnh sửa bắt đầu từ lần mới nhất lên đầu tiên
+                _historyList.Sort((a, b) => b.Id.CompareTo(a.Id));
             }
             catch
             {
@@ -293,18 +298,20 @@ namespace CanXeApp
             for (int i = 0; i < _historyList.Count; i++)
             {
                 var h = _historyList[i];
-                string lanText = _language == "EN" ? $"#{i + 1}" : $"Lần {i + 1}";
+                int lanNumber = count - i; // Lần mới nhất sẽ mang số thứ tự cao nhất
+                string lanText = _language == "EN" ? $"#{lanNumber}" : $"Lần {lanNumber}";
                 string userText = string.IsNullOrWhiteSpace(h.NguoiThayDoi) ? (_language == "EN" ? "Admin" : "Người cân") : h.NguoiThayDoi;
                 string tomTat = (h.NoiDungThayDoi ?? "").Replace("\r\n", " • ").Replace("\n", " • ");
 
                 dgvHistory.Rows.Add(lanText, h.ThoiGianThayDoi.ToString("dd/MM/yyyy HH:mm:ss"), userText, tomTat);
             }
 
-            // Mặc định chọn dòng gần nhất (dòng cuối cùng)
+            // Mặc định chọn dòng trên cùng (lần sửa mới nhất)
             if (dgvHistory.Rows.Count > 0)
             {
                 dgvHistory.ClearSelection();
-                dgvHistory.Rows[dgvHistory.Rows.Count - 1].Selected = true;
+                dgvHistory.Rows[0].Selected = true;
+                DisplayDetailComparison(_historyList[0]);
             }
         }
 
@@ -369,23 +376,40 @@ namespace CanXeApp
                 }
             }
 
-            // Thêm các trường ĐÃ THAY ĐỔI lên trên cùng với màu sắc nổi bật
+            // Thêm các trường ĐÃ THAY ĐỔI lên trên cùng với màu sắc nổi bật (không highlight xanh khi click)
             foreach (var item in changedRows)
             {
                 int rowIdx = dgvDetails.Rows.Add(item.Field, item.OldVal, item.NewVal, _language == "EN" ? "CHANGED" : "ĐÃ THAY ĐỔI");
                 var row = dgvDetails.Rows[rowIdx];
-                row.DefaultCellStyle.BackColor = Color.FromArgb(254, 249, 231); // Vàng kem nhạt dịu mắt
+                Color bg = Color.FromArgb(254, 249, 231); // Vàng kem nhạt dịu mắt
+                row.DefaultCellStyle.BackColor = bg;
+                row.DefaultCellStyle.SelectionBackColor = bg;
+                row.DefaultCellStyle.ForeColor = Color.Black;
+                row.DefaultCellStyle.SelectionForeColor = Color.Black;
                 row.DefaultCellStyle.Font = new Font(dgvDetails.Font, FontStyle.Bold);
+
                 row.Cells["ColTrangThai"].Style.ForeColor = Color.FromArgb(217, 83, 79); // Đỏ cam
+                row.Cells["ColTrangThai"].Style.SelectionForeColor = Color.FromArgb(217, 83, 79);
+                row.Cells["ColTrangThai"].Style.SelectionBackColor = bg;
             }
 
-            // Thêm các trường GIỮ NGUYÊN xuống dưới
+            // Thêm các trường GIỮ NGUYÊN xuống dưới (không highlight xanh khi click)
             foreach (var item in unchangedRows)
             {
                 int rowIdx = dgvDetails.Rows.Add(item.Field, item.OldVal, item.NewVal, _language == "EN" ? "Unchanged" : "Giữ nguyên");
                 var row = dgvDetails.Rows[rowIdx];
+                Color bg = Color.White;
+                row.DefaultCellStyle.BackColor = bg;
+                row.DefaultCellStyle.SelectionBackColor = bg;
+                row.DefaultCellStyle.ForeColor = Color.Black;
+                row.DefaultCellStyle.SelectionForeColor = Color.Black;
+
                 row.Cells["ColTrangThai"].Style.ForeColor = Color.FromArgb(140, 150, 165);
+                row.Cells["ColTrangThai"].Style.SelectionForeColor = Color.FromArgb(140, 150, 165);
+                row.Cells["ColTrangThai"].Style.SelectionBackColor = bg;
             }
+
+            dgvDetails.ClearSelection();
         }
     }
 }

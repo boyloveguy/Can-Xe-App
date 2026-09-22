@@ -14,6 +14,7 @@ namespace CanXeApp
         public bool IsDeleted { get; private set; } = false;
         public bool IsPrintRequested { get; private set; } = false;
         public PhieuCanHistory? RecordedHistory { get; private set; } = null;
+        public bool HasSavedChanges { get; private set; } = false;
         [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public string CurrentLanguage { get; set; } = "VI";
 
@@ -602,9 +603,31 @@ namespace CanXeApp
         {
             if (ValidateAndSaveInput())
             {
-                _isSavedOrDeleted = true;
-                this.DialogResult = DialogResult.OK;
-                this.Close();
+                // Lưu phiếu cân vào cơ sở dữ liệu
+                _dbService.SavePhieuCan(PhieuCanData);
+                if (RecordedHistory != null)
+                {
+                    _dbService.AddPhieuCanHistory(RecordedHistory);
+                    RecordedHistory = null;
+                }
+
+                HasSavedChanges = true;
+
+                // Cập nhật snapshot giá trị ban đầu để phát hiện chỉnh sửa mới nếu có
+                _origSoXe = PhieuCanData.SoXe ?? "";
+                _origLoaiHang = PhieuCanData.LoaiHang ?? "";
+                _origKhachHang = PhieuCanData.KhachHang ?? "";
+                _origKhoiLuongTong = PhieuCanData.KhoiLuongTong;
+                _origKhoiLuongXe = PhieuCanData.KhoiLuongXe;
+                _origNgayInPhieu = PhieuCanData.NgayInPhieu;
+                _origSoChungTu = PhieuCanData.SoChungTu ?? "";
+                _origGhiChu = PhieuCanData.GhiChu ?? "";
+                _origKieuCan = PhieuCanData.KieuCan ?? "";
+
+                // Cập nhật lại số lần chỉnh sửa trên nút "Xem Lịch Sử"
+                UpdateHistoryButtonUI();
+
+                // Lưu ngầm không hiện popup thông báo theo yêu cầu, KHÔNG đóng modal để người dùng tiếp tục xem và chỉnh sửa
             }
         }
 
@@ -612,10 +635,35 @@ namespace CanXeApp
         {
             if (ValidateAndSaveInput())
             {
-                _isSavedOrDeleted = true;
+                // Lưu phiếu cân vào cơ sở dữ liệu
+                _dbService.SavePhieuCan(PhieuCanData);
+                if (RecordedHistory != null)
+                {
+                    _dbService.AddPhieuCanHistory(RecordedHistory);
+                    RecordedHistory = null;
+                }
+
+                HasSavedChanges = true;
                 IsPrintRequested = true;
-                this.DialogResult = DialogResult.OK;
-                this.Close();
+
+                // Cập nhật snapshot giá trị ban đầu để phát hiện chỉnh sửa mới nếu có
+                _origSoXe = PhieuCanData.SoXe ?? "";
+                _origLoaiHang = PhieuCanData.LoaiHang ?? "";
+                _origKhachHang = PhieuCanData.KhachHang ?? "";
+                _origKhoiLuongTong = PhieuCanData.KhoiLuongTong;
+                _origKhoiLuongXe = PhieuCanData.KhoiLuongXe;
+                _origNgayInPhieu = PhieuCanData.NgayInPhieu;
+                _origSoChungTu = PhieuCanData.SoChungTu ?? "";
+                _origGhiChu = PhieuCanData.GhiChu ?? "";
+                _origKieuCan = PhieuCanData.KieuCan ?? "";
+
+                // Cập nhật lại số lần chỉnh sửa trên nút "Xem Lịch Sử"
+                UpdateHistoryButtonUI();
+
+                PrintService ps = new PrintService(PhieuCanData);
+                ps.PrintDirect();
+
+                // KHÔNG đóng modal để người dùng tiếp tục xem và thao tác
             }
         }
 
@@ -635,6 +683,7 @@ namespace CanXeApp
             {
                 _isSavedOrDeleted = true;
                 IsDeleted = true;
+                _dbService.DeletePhieuCan(PhieuCanData.Id);
                 this.DialogResult = DialogResult.OK;
                 this.Close();
             }
