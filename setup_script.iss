@@ -1,6 +1,6 @@
 ; Script Inno Setup tạo bộ cài đặt ứng dụng Cân Xe
 #define MyAppName "Cân Xe App"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "Can Xe"
 #define MyAppExeName "CanXeApp.exe"
 
@@ -16,7 +16,7 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 
 ; File đầu ra của bộ cài
 OutputDir=installer_output
-OutputBaseFilename=CanXeApp_Setup_v1.0
+OutputBaseFilename=CanXeApp_Setup_v1.1
 SetupIconFile=app_icon.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -30,7 +30,7 @@ PrivilegesRequired=lowest
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
 ; Lấy toàn bộ file đã publish single-file từ thư mục publish
