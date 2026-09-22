@@ -10,3 +10,6 @@ obj/
 # Database files (local runtime data)
 *.db
 *.db-journal
+
+# Inno Setup output
+installer_output/

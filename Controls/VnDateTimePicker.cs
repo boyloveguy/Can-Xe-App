@@ -24,6 +24,9 @@ namespace CanXeApp.Controls
         public event EventHandler? ValueChanged;
 
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool IsUserModified { get; set; } = false;
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public DateTime Value
         {
             get => _value;
@@ -93,16 +96,25 @@ namespace CanXeApp.Controls
             InitializeComponentCustom();
         }
 
+        protected override void OnFontChanged(EventArgs e)
+        {
+            base.OnFontChanged(e);
+            if (_txtDate != null)
+            {
+                _txtDate.Font = this.Font;
+            }
+        }
+
         private void InitializeComponentCustom()
         {
-            this.Size = new Size(185, 28);
+            this.Size = new Size(185, 34);
             this.BackColor = Color.White;
             this.BorderStyle = BorderStyle.FixedSingle;
 
             _pnlContainer = new Panel
             {
                 Dock = DockStyle.Fill,
-                Padding = new Padding(2, 3, 2, 1),
+                Padding = new Padding(3, 4, 2, 1),
                 BackColor = Color.White
             };
 
@@ -110,7 +122,7 @@ namespace CanXeApp.Controls
             {
                 BorderStyle = BorderStyle.None,
                 Dock = DockStyle.Fill,
-                Font = new Font("Segoe UI", 9.5F, FontStyle.Regular),
+                Font = new Font("Segoe UI", 11F, FontStyle.Regular),
                 Multiline = false,
                 BackColor = Color.White
             };
@@ -121,11 +133,11 @@ namespace CanXeApp.Controls
             {
                 Text = "📅",
                 Dock = DockStyle.Right,
-                Width = 26,
+                Width = 30,
                 FlatStyle = FlatStyle.Flat,
                 Cursor = Cursors.Hand,
                 BackColor = Color.FromArgb(240, 242, 245),
-                Font = new Font("Segoe UI Emoji", 8.5F)
+                Font = new Font("Segoe UI Emoji", 10F)
             };
             _btnCalendar.FlatAppearance.BorderSize = 0;
             _btnCalendar.Click += BtnCalendar_Click;
@@ -184,6 +196,7 @@ namespace CanXeApp.Controls
 
         private void Calendar_DateSelected(object? sender, DateTime e)
         {
+            IsUserModified = true;
             Value = e;
             _dropDown.Close();
         }
@@ -208,6 +221,10 @@ namespace CanXeApp.Controls
             if (DateTime.TryParseExact(_txtDate.Text.Trim(), _customFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime dt) ||
                 DateTime.TryParse(_txtDate.Text.Trim(), out dt))
             {
+                if (_value != dt)
+                {
+                    IsUserModified = true;
+                }
                 Value = dt;
             }
             else

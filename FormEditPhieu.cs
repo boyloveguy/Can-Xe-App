@@ -13,12 +13,28 @@ namespace CanXeApp
         public PhieuCan PhieuCanData { get; private set; }
         public bool IsDeleted { get; private set; } = false;
         public bool IsPrintRequested { get; private set; } = false;
+        public PhieuCanHistory? RecordedHistory { get; private set; } = null;
         [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public string CurrentLanguage { get; set; } = "VI";
+
+        private readonly DatabaseService _dbService;
+
+        // Lưu bản snapshot giá trị gốc để kiểm tra người dùng đã thay đổi dữ liệu chưa
+        private string _origSoXe = "";
+        private string _origLoaiHang = "";
+        private string _origKhachHang = "";
+        private double _origKhoiLuongTong = 0;
+        private double _origKhoiLuongXe = 0;
+        private DateTime _origNgayInPhieu = DateTime.MinValue;
+        private string _origSoChungTu = "";
+        private string _origGhiChu = "";
+        private string _origKieuCan = "";
+        private bool _isSavedOrDeleted = false;
 
         private Label lblSoXe, lblLoaiHang, lblKhachHang;
         private Label lblKhoiLuongTong, lblKhoiLuongXe, lblKhoiLuongHang;
         private Label lblNgayInPhieu, lblSoChungTu, lblGhiChu, lblKieuCan, lblSTT;
+        private Label lblLichSu;
 
         private TextBox txtSoXe, txtKhachHang;
         private ComboBox cbLoaiHang;
@@ -30,16 +46,21 @@ namespace CanXeApp
         private TextBox txtSTT;
 
         private Button btnSave, btnPrintAndSave, btnPreview, btnDelete, btnCancel;
+        private Button btnLichSu;
 
         private readonly string[] _dsLoaiHang = new string[]
         {
             "Mía", "Dưa", "Phế Liệu", "Keo", "Gỗ", "Lúa", "Đậu Đỏ", "Bắp", "Mì", "Bì Cao Su"
         };
 
-        public FormEditPhieu(PhieuCan phieuCan, string language = "VI")
+        private float _zoom = 1.0f;
+
+        public FormEditPhieu(PhieuCan phieuCan, string language = "VI", float zoom = 1.0f, DatabaseService? dbService = null)
         {
             PhieuCanData = phieuCan;
             CurrentLanguage = language;
+            _zoom = zoom > 0 ? zoom : 1.0f;
+            _dbService = dbService ?? new DatabaseService();
             InitializeComponentCustom();
             ApplyLanguage();
             LoadPhieuData();
@@ -49,13 +70,15 @@ namespace CanXeApp
 
         private void InitializeComponentCustom()
         {
-            this.Text = $"CHỈNH SỬA PHIẾU CÂN - STT: {PhieuCanData.STT}";
-            this.Size = new Size(720, 420);
+            this.Text = $"CHỈNH SỬA PHIẾU CÂN - STT: Xe {PhieuCanData.STT}";
+            int formW = (int)Math.Round(850 * _zoom);
+            int formH = (int)Math.Round(475 * _zoom);
+            this.ClientSize = new Size(formW, formH);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
-            this.Font = new Font("Segoe UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
+            this.Font = new Font("Segoe UI", Math.Max(8f, 11F * _zoom), FontStyle.Regular, GraphicsUnit.Point);
             this.BackColor = Color.FromArgb(245, 247, 250);
 
             this.Click += ClearFocus_Click;
@@ -68,75 +91,97 @@ namespace CanXeApp
             }
             catch { }
 
-            int y = 20;
-            int lblX1 = 20, txtX1 = 130, txtWidth1 = 180;
-            int lblX2 = 345, txtX2 = 460, txtWidth2 = 220;
+            int y = (int)Math.Round(25 * _zoom);
+            int yStep = (int)Math.Round(46 * _zoom);
+            int lblX1 = (int)Math.Round(20 * _zoom);
+            int txtX1 = (int)Math.Round(150 * _zoom);
+            int txtWidth1 = (int)Math.Round(220 * _zoom);
+            int lblX2 = (int)Math.Round(410 * _zoom);
+            int txtX2 = (int)Math.Round(550 * _zoom);
+            int txtWidth2 = (int)Math.Round(270 * _zoom);
+            float fontBold = Math.Max(8f, 11.5F * _zoom);
 
             // STT & Số xe (Giới hạn 50 ký tự)
             lblSTT = CreateLabel("STT:", lblX1, y);
-            txtSTT = new TextBox { Location = new Point(txtX1, y - 3), Width = txtWidth1, ReadOnly = true, Enabled = false, Font = new Font("Segoe UI", 10F, FontStyle.Bold) };
+            txtSTT = new TextBox { Location = new Point(txtX1, y - (int)Math.Round(3 * _zoom)), Width = txtWidth1, ReadOnly = true, Enabled = false, Font = new Font("Segoe UI", fontBold, FontStyle.Bold) };
 
             lblSoXe = CreateLabelWithRedAsterisk("Số xe", lblX2, y);
-            txtSoXe = new TextBox { Location = new Point(txtX2, y - 3), Width = txtWidth2, Font = new Font("Segoe UI", 10F, FontStyle.Bold), ForeColor = Color.DarkBlue, MaxLength = 50 };
+            txtSoXe = new TextBox { Location = new Point(txtX2, y - (int)Math.Round(3 * _zoom)), Width = txtWidth2, Font = new Font("Segoe UI", fontBold, FontStyle.Bold), ForeColor = Color.DarkBlue, MaxLength = 50 };
             txtSoXe.Enter += Input_SelectAllOnEnter;
             txtSoXe.MouseClick += Input_SelectAllOnEnter;
 
-            y += 40;
+            y += yStep;
             // Loại hàng & Khách hàng (Giới hạn 50 ký tự)
             lblLoaiHang = CreateLabel("Loại hàng:", lblX1, y);
-            cbLoaiHang = new ComboBox { Location = new Point(txtX1, y - 3), Width = txtWidth1, DropDownStyle = ComboBoxStyle.DropDown, Font = new Font("Segoe UI", 10F, FontStyle.Bold), MaxLength = 50 };
+            cbLoaiHang = new ComboBox { Location = new Point(txtX1, y - (int)Math.Round(3 * _zoom)), Width = txtWidth1, DropDownStyle = ComboBoxStyle.DropDown, Font = new Font("Segoe UI", fontBold, FontStyle.Bold), MaxLength = 50 };
             cbLoaiHang.Items.AddRange(_dsLoaiHang);
             cbLoaiHang.Leave += CbLoaiHang_Leave;
             cbLoaiHang.Enter += Input_SelectAllOnEnter;
 
             lblKhachHang = CreateLabel("Khách hàng:", lblX2, y);
-            txtKhachHang = new TextBox { Location = new Point(txtX2, y - 3), Width = txtWidth2, Font = new Font("Segoe UI", 10F, FontStyle.Bold), MaxLength = 50 };
+            txtKhachHang = new TextBox { Location = new Point(txtX2, y - (int)Math.Round(3 * _zoom)), Width = txtWidth2, Font = new Font("Segoe UI", fontBold, FontStyle.Bold), MaxLength = 50 };
             txtKhachHang.Leave += TxtKhachHang_Leave;
             txtKhachHang.Enter += Input_SelectAllOnEnter;
             txtKhachHang.MouseClick += Input_SelectAllOnEnter;
 
-            y += 40;
+            y += yStep;
             // KL Tong & Ngày in phiếu
             lblKhoiLuongTong = CreateLabel("KL Tổng (Kg):", lblX1, y);
-            numKhoiLuongTong = new FormattedNumericTextBox { Location = new Point(txtX1, y - 3), Width = txtWidth1 };
+            numKhoiLuongTong = new FormattedNumericTextBox { Location = new Point(txtX1, y - (int)Math.Round(3 * _zoom)), Width = txtWidth1, Font = new Font("Segoe UI", fontBold, FontStyle.Bold) };
             numKhoiLuongTong.TextChanged += CalculateKLHangRealtime;
 
             lblNgayInPhieu = CreateLabel("Ngày in phiếu:", lblX2, y);
-            dtpNgayInPhieu = new VnDateTimePicker { Location = new Point(txtX2, y - 3), Width = txtWidth2, CustomFormat = "dd/MM/yyyy HH:mm", PreventFutureDates = true, Language = CurrentLanguage };
+            dtpNgayInPhieu = new VnDateTimePicker { Location = new Point(txtX2, y - (int)Math.Round(3 * _zoom)), Width = txtWidth2, Height = (int)Math.Round(34 * _zoom), Font = new Font("Segoe UI", fontBold, FontStyle.Regular), CustomFormat = "dd/MM/yyyy HH:mm", PreventFutureDates = true, Language = CurrentLanguage };
 
-            y += 40;
+            y += yStep;
             // KL Xe & Kiểu cân
             lblKhoiLuongXe = CreateLabel("KL Xe (Kg):", lblX1, y);
-            numKhoiLuongXe = new FormattedNumericTextBox { Location = new Point(txtX1, y - 3), Width = txtWidth1 };
+            numKhoiLuongXe = new FormattedNumericTextBox { Location = new Point(txtX1, y - (int)Math.Round(3 * _zoom)), Width = txtWidth1, Font = new Font("Segoe UI", fontBold, FontStyle.Bold) };
             numKhoiLuongXe.TextChanged += CalculateKLHangRealtime;
 
             lblKieuCan = CreateLabel("Kiểu cân:", lblX2, y);
-            cbKieuCan = new ComboBox { Location = new Point(txtX2, y - 3), Width = txtWidth2, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 10F, FontStyle.Bold) };
+            cbKieuCan = new ComboBox { Location = new Point(txtX2, y - (int)Math.Round(3 * _zoom)), Width = txtWidth2, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", fontBold, FontStyle.Bold) };
             cbKieuCan.Items.AddRange(new object[] { "Cân dịch vụ", "Xuất hàng", "Nhập hàng" });
 
-            y += 40;
+            y += yStep;
             // KL Hang & Số chứng từ (Giới hạn 50 ký tự)
             lblKhoiLuongHang = CreateLabel("KL Hàng (Kg):", lblX1, y);
-            txtKhoiLuongHang = new TextBox { Location = new Point(txtX1, y - 3), Width = txtWidth1, ReadOnly = true, Enabled = false, Font = new Font("Segoe UI", 11F, FontStyle.Bold), ForeColor = Color.White, BackColor = Color.Red };
+            txtKhoiLuongHang = new TextBox { Location = new Point(txtX1, y - (int)Math.Round(3 * _zoom)), Width = txtWidth1, ReadOnly = true, Enabled = false, Font = new Font("Segoe UI", Math.Max(8f, 12F * _zoom), FontStyle.Bold), ForeColor = Color.White, BackColor = Color.Red };
 
             lblSoChungTu = CreateLabel("Số chứng từ:", lblX2, y);
-            txtSoChungTu = new TextBox { Location = new Point(txtX2, y - 3), Width = txtWidth2, Font = new Font("Segoe UI", 10F, FontStyle.Bold), MaxLength = 50 };
+            txtSoChungTu = new TextBox { Location = new Point(txtX2, y - (int)Math.Round(3 * _zoom)), Width = txtWidth2, Font = new Font("Segoe UI", fontBold, FontStyle.Bold), MaxLength = 50 };
             txtSoChungTu.Enter += Input_SelectAllOnEnter;
             txtSoChungTu.MouseClick += Input_SelectAllOnEnter;
 
-            y += 40;
-            // Ghi chú (Giới hạn 200 ký tự)
+            y += yStep;
+            // Ghi chú (Giới hạn 150 ký tự) & Lịch sử chỉnh sửa
             lblGhiChu = CreateLabel("Ghi chú:", lblX1, y);
-            txtGhiChu = new TextBox { Location = new Point(txtX1, y - 3), Width = txtWidth1, Font = new Font("Segoe UI", 10F, FontStyle.Bold), MaxLength = 200 };
+            txtGhiChu = new TextBox { Location = new Point(txtX1, y - (int)Math.Round(3 * _zoom)), Width = txtWidth1, Font = new Font("Segoe UI", fontBold, FontStyle.Bold), MaxLength = 150 };
             txtGhiChu.Enter += Input_SelectAllOnEnter;
             txtGhiChu.MouseClick += Input_SelectAllOnEnter;
 
-            y += 60;
-            btnSave = CreateButton("💾 Lưu Thay Đổi", 15, y, 130, Color.FromArgb(0, 123, 255));
-            btnPrintAndSave = CreateButton("🖨️ In Và Lưu Phiếu", 150, y, 150, Color.FromArgb(220, 53, 69));
-            btnPreview = CreateButton("👁️ Xem Trước", 305, y, 120, Color.FromArgb(23, 162, 184));
-            btnDelete = CreateButton("🗑️ Xóa Phiếu", 430, y, 120, Color.FromArgb(220, 53, 69));
-            btnCancel = CreateButton("❌ Đóng", 555, y, 110, Color.FromArgb(108, 117, 125));
+            lblLichSu = CreateLabel("Lịch sử:", lblX2, y);
+            btnLichSu = CreateHistoryButton("📜 Xem Lịch Sử (0)", txtX2, y - (int)Math.Round(3 * _zoom), txtWidth2, (int)Math.Round(33 * _zoom));
+            btnLichSu.Click += BtnLichSu_Click;
+
+            y += (int)Math.Round(56 * _zoom);
+            int btnW = (int)Math.Round(145 * _zoom);
+            int btnWPrint = (int)Math.Round(165 * _zoom);
+            int gap = (int)Math.Round(10 * _zoom);
+            int totalBtnsW = (btnW * 4) + btnWPrint + (gap * 4);
+            int startX = Math.Max(10, (formW - totalBtnsW) / 2);
+
+            int x0 = startX;
+            int x1 = x0 + btnW + gap;
+            int x2 = x1 + btnWPrint + gap;
+            int x3 = x2 + btnW + gap;
+            int x4 = x3 + btnW + gap;
+
+            btnSave = CreateButton("💾 Lưu Thay Đổi", x0, y, btnW, Color.FromArgb(0, 123, 255));
+            btnPrintAndSave = CreateButton("🖨️ In Và Lưu Phiếu", x1, y, btnWPrint, Color.FromArgb(220, 53, 69));
+            btnPreview = CreateButton("👁️ Xem Trước", x2, y, btnW, Color.FromArgb(23, 162, 184));
+            btnDelete = CreateButton("🗑️ Xóa Phiếu", x3, y, btnW, Color.FromArgb(220, 53, 69));
+            btnCancel = CreateButton("❌ Đóng", x4, y, btnW, Color.FromArgb(108, 117, 125));
 
             btnSave.Click += BtnSave_Click;
             btnPrintAndSave.Click += BtnPrintAndSave_Click;
@@ -150,7 +195,7 @@ namespace CanXeApp
                 lblKhoiLuongTong, numKhoiLuongTong, lblNgayInPhieu, dtpNgayInPhieu,
                 lblKhoiLuongXe, numKhoiLuongXe, lblKieuCan, cbKieuCan,
                 lblKhoiLuongHang, txtKhoiLuongHang, lblSoChungTu, txtSoChungTu,
-                lblGhiChu, txtGhiChu,
+                lblGhiChu, txtGhiChu, lblLichSu, btnLichSu,
                 btnSave, btnPrintAndSave, btnPreview, btnDelete, btnCancel
             });
         }
@@ -160,9 +205,9 @@ namespace CanXeApp
             dtpNgayInPhieu.Language = CurrentLanguage;
             if (CurrentLanguage == "EN")
             {
-                this.Text = $"EDIT WEIGHING TICKET - NO: {PhieuCanData.STT}";
+                this.Text = $"EDIT TICKET - NO: Xe {PhieuCanData.STT}";
                 lblSTT.Text = "No:";
-                UpdateSoXeLabelPosition("Plate No", 345, 20);
+                UpdateSoXeLabelPosition("Plate No", (int)Math.Round(410 * _zoom), (int)Math.Round(25 * _zoom));
                 lblLoaiHang.Text = "Goods Type:";
                 lblKhachHang.Text = "Customer:";
                 lblKhoiLuongTong.Text = "Gross Wt (Kg):";
@@ -172,11 +217,12 @@ namespace CanXeApp
                 lblKieuCan.Text = "Weigh Type:";
                 lblSoChungTu.Text = "Voucher No:";
                 lblGhiChu.Text = "Note:";
+                if (lblLichSu != null) lblLichSu.Text = "History:";
 
                 btnSave.Text = "💾 Save Changes";
                 btnPrintAndSave.Text = "🖨️ Print & Save";
                 btnPreview.Text = "👁️ Preview";
-                btnDelete.Text = "🗑️ Delete Ticket";
+                btnDelete.Text = "🗑️ Delete";
                 btnCancel.Text = "❌ Close";
 
                 int selKieuCan = cbKieuCan.SelectedIndex;
@@ -186,9 +232,9 @@ namespace CanXeApp
             }
             else
             {
-                this.Text = $"CHỈNH SỬA PHIẾU CÂN - STT: {PhieuCanData.STT}";
+                this.Text = $"CHỈNH SỬA PHIẾU CÂN - STT: Xe {PhieuCanData.STT}";
                 lblSTT.Text = "STT:";
-                UpdateSoXeLabelPosition("Số xe", 345, 20);
+                UpdateSoXeLabelPosition("Số xe", (int)Math.Round(410 * _zoom), (int)Math.Round(25 * _zoom));
                 lblLoaiHang.Text = "Loại hàng:";
                 lblKhachHang.Text = "Khách hàng:";
                 lblKhoiLuongTong.Text = "KL Tổng (Kg):";
@@ -198,6 +244,7 @@ namespace CanXeApp
                 lblKieuCan.Text = "Kiểu cân:";
                 lblSoChungTu.Text = "Số chứng từ:";
                 lblGhiChu.Text = "Ghi chú:";
+                if (lblLichSu != null) lblLichSu.Text = "Lịch sử:";
 
                 btnSave.Text = "💾 Lưu Thay Đổi";
                 btnPrintAndSave.Text = "🖨️ In Và Lưu Phiếu";
@@ -210,54 +257,135 @@ namespace CanXeApp
                 cbKieuCan.Items.AddRange(new object[] { "Cân dịch vụ", "Xuất hàng", "Nhập hàng" });
                 if (selKieuCan >= 0 && selKieuCan < cbKieuCan.Items.Count) cbKieuCan.SelectedIndex = selKieuCan;
             }
+            UpdateHistoryButtonUI();
         }
 
         private Label CreateLabel(string text, int x, int y)
         {
-            var lbl = new Label { Text = text, Location = new Point(x, y), AutoSize = true, Font = new Font("Segoe UI", 9.5F) };
+            var lbl = new Label { Text = text, Location = new Point(x, y), AutoSize = true, Font = new Font("Segoe UI", 11F) };
             lbl.Click += ClearFocus_Click;
             return lbl;
         }
 
-        private Label lblSoXeAsterisk, lblSoXeClose;
-
         private Label CreateLabelWithRedAsterisk(string text, int x, int y)
         {
-            lblSoXe = new Label { Text = text + " (", Location = new Point(x, y), AutoSize = true, Font = new Font("Segoe UI", 9.5F) };
-            lblSoXeAsterisk = new Label { Text = "*", Location = new Point(x + 40, y), AutoSize = true, Font = new Font("Segoe UI", 9.5F, FontStyle.Bold), ForeColor = Color.Red };
-            lblSoXeClose = new Label { Text = "):", Location = new Point(x + 48, y), AutoSize = true, Font = new Font("Segoe UI", 9.5F) };
-
+            lblSoXe = new Label
+            {
+                Text = "",
+                Location = new Point(x, y),
+                Size = new Size(130, 26),
+                Font = new Font("Segoe UI", 11F, FontStyle.Regular),
+                ForeColor = Color.FromArgb(30, 40, 60),
+                BackColor = Color.Transparent
+            };
+            lblSoXe.Paint += LblSoXe_Paint;
             lblSoXe.Click += ClearFocus_Click;
-            lblSoXeAsterisk.Click += ClearFocus_Click;
-            lblSoXeClose.Click += ClearFocus_Click;
-
-            this.Controls.Add(lblSoXeAsterisk);
-            this.Controls.Add(lblSoXeClose);
             UpdateSoXeLabelPosition(text, x, y);
             return lblSoXe;
         }
 
+        private void LblSoXe_Paint(object? sender, PaintEventArgs e)
+        {
+            if (lblSoXe == null) return;
+            e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+            string prefix = "Số xe (";
+            string star = "*";
+            string suffix = "):";
+
+            Font font = lblSoXe.Font;
+            using var fontStar = new Font(font.FontFamily, font.SizeInPoints, FontStyle.Bold);
+
+            Size szPrefix = TextRenderer.MeasureText(e.Graphics, prefix, font, Size.Empty, TextFormatFlags.NoPadding);
+            Size szStar = TextRenderer.MeasureText(e.Graphics, star, fontStar, Size.Empty, TextFormatFlags.NoPadding);
+
+            int curX = 0;
+            int curY = 0;
+
+            TextRenderer.DrawText(e.Graphics, prefix, font, new Point(curX, curY), lblSoXe.ForeColor, TextFormatFlags.NoPadding);
+            curX += szPrefix.Width;
+
+            TextRenderer.DrawText(e.Graphics, star, fontStar, new Point(curX, curY), Color.Red, TextFormatFlags.NoPadding);
+            curX += szStar.Width;
+
+            TextRenderer.DrawText(e.Graphics, suffix, font, new Point(curX, curY), lblSoXe.ForeColor, TextFormatFlags.NoPadding);
+        }
+
         private void UpdateSoXeLabelPosition(string mainText, int x, int y)
         {
-            if (lblSoXe == null || lblSoXeAsterisk == null || lblSoXeClose == null) return;
-
-            lblSoXe.Text = mainText + " (";
-            using (Graphics g = this.CreateGraphics())
-            {
-                SizeF szMain = g.MeasureString(lblSoXe.Text, lblSoXe.Font);
-                int mainWidth = (int)szMain.Width - 4;
-
-                lblSoXeAsterisk.Location = new Point(x + mainWidth, y);
-                SizeF szAst = g.MeasureString("*", lblSoXeAsterisk.Font);
-                int astWidth = (int)szAst.Width - 6;
-
-                lblSoXeClose.Location = new Point(x + mainWidth + astWidth, y);
-            }
+            if (lblSoXe == null) return;
+            lblSoXe.Location = new Point(x, y);
+            lblSoXe.Invalidate();
         }
 
         private Button CreateButton(string text, int x, int y, int width, Color backColor)
         {
-            return new Button { Text = text, Location = new Point(x, y), Size = new Size(width, 40), BackColor = backColor, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9.5F, FontStyle.Bold), Cursor = Cursors.Hand };
+            var btn = new Button
+            {
+                Text = text,
+                Location = new Point(x, y),
+                Size = new Size(width, 42),
+                BackColor = backColor,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Padding = Padding.Empty,
+                Cursor = Cursors.Hand
+            };
+            btn.FlatAppearance.BorderSize = 0;
+            return btn;
+        }
+
+        private Button CreateHistoryButton(string text, int x, int y, int width, int height)
+        {
+            var btn = new Button
+            {
+                Text = text,
+                Location = new Point(x, y),
+                Size = new Size(width, height),
+                BackColor = Color.FromArgb(235, 240, 248),
+                ForeColor = Color.FromArgb(70, 80, 95),
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", Math.Max(8f, 10F * _zoom), FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Padding = Padding.Empty,
+                Cursor = Cursors.Hand
+            };
+            btn.FlatAppearance.BorderSize = 1;
+            btn.FlatAppearance.BorderColor = Color.FromArgb(195, 205, 220);
+            return btn;
+        }
+
+        public void UpdateHistoryButtonUI()
+        {
+            if (btnLichSu == null) return;
+            int count = 0;
+            try
+            {
+                count = _dbService.GetHistoryCount(PhieuCanData.Id);
+            }
+            catch { }
+
+            if (count == 0)
+            {
+                btnLichSu.Text = CurrentLanguage == "EN" ? "📜 View History (0)" : "📜 Xem Lịch Sử (0 lần)";
+                btnLichSu.BackColor = Color.FromArgb(235, 240, 248);
+                btnLichSu.ForeColor = Color.FromArgb(90, 100, 115);
+                btnLichSu.FlatAppearance.BorderColor = Color.FromArgb(205, 215, 228);
+            }
+            else
+            {
+                btnLichSu.Text = CurrentLanguage == "EN" ? $"📜 View History ({count})" : $"📜 Xem Lịch Sử ({count} lần)";
+                btnLichSu.BackColor = Color.FromArgb(111, 66, 193); // Tím hiện đại
+                btnLichSu.ForeColor = Color.White;
+                btnLichSu.FlatAppearance.BorderColor = Color.FromArgb(95, 50, 175);
+            }
+        }
+
+        private void BtnLichSu_Click(object? sender, EventArgs e)
+        {
+            using var formHistory = new FormLichSuEdit(PhieuCanData.Id, PhieuCanData.STT, PhieuCanData.SoXe, _dbService, CurrentLanguage, _zoom);
+            formHistory.ShowDialog(this);
         }
 
         private void ClearFocus_Click(object? sender, EventArgs e)
@@ -320,7 +448,7 @@ namespace CanXeApp
 
         private void LoadPhieuData()
         {
-            txtSTT.Text = PhieuCanData.STT.ToString();
+            txtSTT.Text = $"Xe {PhieuCanData.STT}";
             txtSoXe.Text = PhieuCanData.SoXe;
             cbLoaiHang.Text = PhieuCanData.LoaiHang;
             txtKhachHang.Text = PhieuCanData.KhachHang;
@@ -331,17 +459,59 @@ namespace CanXeApp
             txtGhiChu.Text = PhieuCanData.GhiChu;
             cbKieuCan.SelectedItem = PhieuCanData.KieuCan;
 
+            // Lưu snapshot giá trị ban đầu để phát hiện chỉnh sửa
+            _origSoXe = PhieuCanData.SoXe ?? "";
+            _origLoaiHang = PhieuCanData.LoaiHang ?? "";
+            _origKhachHang = PhieuCanData.KhachHang ?? "";
+            _origKhoiLuongTong = PhieuCanData.KhoiLuongTong;
+            _origKhoiLuongXe = PhieuCanData.KhoiLuongXe;
+            _origNgayInPhieu = PhieuCanData.NgayInPhieu;
+            _origSoChungTu = PhieuCanData.SoChungTu ?? "";
+            _origGhiChu = PhieuCanData.GhiChu ?? "";
+            _origKieuCan = PhieuCanData.KieuCan ?? "";
+            _isSavedOrDeleted = false;
+            dtpNgayInPhieu.IsUserModified = false;
+            UpdateHistoryButtonUI();
+
             CalculateKLHangRealtime(null, null);
         }
 
-        private void UpdateDataFromInputs()
+        public bool HasDataChangesExcludingDate()
+        {
+            if (txtSoXe.Text.Trim() != _origSoXe.Trim()) return true;
+            if (cbLoaiHang.Text.Trim() != _origLoaiHang.Trim()) return true;
+            if (txtKhachHang.Text.Trim() != _origKhachHang.Trim()) return true;
+            if (Math.Abs(numKhoiLuongTong.Value - _origKhoiLuongTong) > 0.001) return true;
+            if (Math.Abs(numKhoiLuongXe.Value - _origKhoiLuongXe) > 0.001) return true;
+            if (txtSoChungTu.Text.Trim() != _origSoChungTu.Trim()) return true;
+            if (txtGhiChu.Text.Trim() != _origGhiChu.Trim()) return true;
+            if ((cbKieuCan.SelectedItem?.ToString() ?? "") != _origKieuCan) return true;
+
+            return false;
+        }
+
+        public bool HasDateManuallyChanged()
+        {
+            return dtpNgayInPhieu.IsUserModified && Math.Abs((dtpNgayInPhieu.Value - _origNgayInPhieu).TotalMinutes) >= 1;
+        }
+
+        public bool HasUnsavedChanges()
+        {
+            if (_isSavedOrDeleted) return false;
+            return HasDataChangesExcludingDate() || HasDateManuallyChanged();
+        }
+
+        private void UpdateDataFromInputs(bool keepCalculatedDate = false)
         {
             PhieuCanData.SoXe = txtSoXe.Text.Trim();
             PhieuCanData.LoaiHang = cbLoaiHang.Text.Trim();
             PhieuCanData.KhachHang = txtKhachHang.Text.Trim();
             PhieuCanData.KhoiLuongTong = numKhoiLuongTong.Value;
             PhieuCanData.KhoiLuongXe = numKhoiLuongXe.Value;
-            PhieuCanData.NgayInPhieu = dtpNgayInPhieu.Value;
+            if (!keepCalculatedDate)
+            {
+                PhieuCanData.NgayInPhieu = dtpNgayInPhieu.Value;
+            }
             PhieuCanData.SoChungTu = txtSoChungTu.Text.Trim();
             PhieuCanData.GhiChu = txtGhiChu.Text.Trim();
             PhieuCanData.KieuCan = cbKieuCan.SelectedItem?.ToString() ?? "Cân dịch vụ";
@@ -356,14 +526,119 @@ namespace CanXeApp
                 return false;
             }
 
-            UpdateDataFromInputs();
+            bool hasDataChanges = HasDataChangesExcludingDate();
+            bool isDateChanged = HasDateManuallyChanged();
+
+            if (hasDataChanges)
+            {
+                // Yêu cầu 1: Khi có thay đổi edit và lưu lại thì update ngày in phiếu là thời gian hiện tại
+                if (!isDateChanged)
+                {
+                    PhieuCanData.NgayInPhieu = DateTime.Now;
+                    dtpNgayInPhieu.Value = PhieuCanData.NgayInPhieu;
+                }
+                else
+                {
+                    // Người dùng chủ động đổi một ngày giờ cụ thể
+                    PhieuCanData.NgayInPhieu = dtpNgayInPhieu.Value;
+                }
+            }
+            else if (isDateChanged)
+            {
+                PhieuCanData.NgayInPhieu = dtpNgayInPhieu.Value;
+            }
+            else
+            {
+                // Yêu cầu 1: Nếu không edit gì mà nhấn lưu thì vẫn giữ thời gian cũ
+                PhieuCanData.NgayInPhieu = _origNgayInPhieu;
+            }
+
+            UpdateDataFromInputs(keepCalculatedDate: true);
+
+            if (hasDataChanges || isDateChanged)
+            {
+                BuildRecordedHistory();
+            }
+
             return true;
+        }
+
+        private void BuildRecordedHistory()
+        {
+            var deCulture = new CultureInfo("de-DE");
+            var oldDict = new System.Collections.Generic.Dictionary<string, string>
+            {
+                ["SoXe"] = _origSoXe,
+                ["LoaiHang"] = _origLoaiHang,
+                ["KhachHang"] = _origKhachHang,
+                ["KhoiLuongTong"] = _origKhoiLuongTong.ToString("#,##0", deCulture),
+                ["KhoiLuongXe"] = _origKhoiLuongXe.ToString("#,##0", deCulture),
+                ["KhoiLuongHang"] = Math.Max(0, _origKhoiLuongTong - _origKhoiLuongXe).ToString("#,##0", deCulture),
+                ["NgayInPhieu"] = _origNgayInPhieu.ToString("dd/MM/yyyy HH:mm"),
+                ["KieuCan"] = _origKieuCan,
+                ["SoChungTu"] = _origSoChungTu,
+                ["GhiChu"] = _origGhiChu
+            };
+
+            var newDict = new System.Collections.Generic.Dictionary<string, string>
+            {
+                ["SoXe"] = PhieuCanData.SoXe,
+                ["LoaiHang"] = PhieuCanData.LoaiHang,
+                ["KhachHang"] = PhieuCanData.KhachHang,
+                ["KhoiLuongTong"] = PhieuCanData.KhoiLuongTong.ToString("#,##0", deCulture),
+                ["KhoiLuongXe"] = PhieuCanData.KhoiLuongXe.ToString("#,##0", deCulture),
+                ["KhoiLuongHang"] = PhieuCanData.KhoiLuongHang.ToString("#,##0", deCulture),
+                ["NgayInPhieu"] = PhieuCanData.NgayInPhieu.ToString("dd/MM/yyyy HH:mm"),
+                ["KieuCan"] = PhieuCanData.KieuCan,
+                ["SoChungTu"] = PhieuCanData.SoChungTu,
+                ["GhiChu"] = PhieuCanData.GhiChu
+            };
+
+            var changes = new System.Collections.Generic.List<string>();
+            var fieldLabels = new System.Collections.Generic.Dictionary<string, (string Vi, string En)>
+            {
+                ["SoXe"] = ("Biển số xe", "Plate No"),
+                ["LoaiHang"] = ("Loại hàng", "Goods Type"),
+                ["KhachHang"] = ("Khách hàng", "Customer"),
+                ["KhoiLuongTong"] = ("KL Tổng", "Gross Wt"),
+                ["KhoiLuongXe"] = ("KL Xe", "Tare Wt"),
+                ["KhoiLuongHang"] = ("KL Hàng", "Net Wt"),
+                ["NgayInPhieu"] = ("Ngày in phiếu", "Ticket Date"),
+                ["KieuCan"] = ("Kiểu cân", "Weigh Type"),
+                ["SoChungTu"] = ("Số chứng từ", "Voucher No"),
+                ["GhiChu"] = ("Ghi chú", "Note")
+            };
+
+            foreach (var kvp in fieldLabels)
+            {
+                string oldVal = oldDict.ContainsKey(kvp.Key) ? oldDict[kvp.Key] : "";
+                string newVal = newDict.ContainsKey(kvp.Key) ? newDict[kvp.Key] : "";
+                if (oldVal != newVal)
+                {
+                    string label = CurrentLanguage == "EN" ? kvp.Value.En : kvp.Value.Vi;
+                    string unit = kvp.Key.StartsWith("KhoiLuong") ? " kg" : "";
+                    changes.Add($"{label}: {oldVal}{unit} ➔ {newVal}{unit}");
+                }
+            }
+
+            RecordedHistory = new PhieuCanHistory
+            {
+                PhieuCanId = PhieuCanData.Id,
+                STT = PhieuCanData.STT,
+                ThoiGianThayDoi = DateTime.Now,
+                NguoiThayDoi = PhieuCanData.NguoiCan,
+                HanhDong = CurrentLanguage == "EN" ? "Edit Ticket" : "Chỉnh sửa phiếu",
+                NoiDungThayDoi = string.Join("\n", changes),
+                DuLieuCuJson = System.Text.Json.JsonSerializer.Serialize(oldDict),
+                DuLieuMoiJson = System.Text.Json.JsonSerializer.Serialize(newDict)
+            };
         }
 
         private void BtnSave_Click(object? sender, EventArgs e)
         {
             if (ValidateAndSaveInput())
             {
+                _isSavedOrDeleted = true;
                 this.DialogResult = DialogResult.OK;
                 this.Close();
             }
@@ -373,6 +648,7 @@ namespace CanXeApp
         {
             if (ValidateAndSaveInput())
             {
+                _isSavedOrDeleted = true;
                 IsPrintRequested = true;
                 this.DialogResult = DialogResult.OK;
                 this.Close();
@@ -381,7 +657,24 @@ namespace CanXeApp
 
         private void BtnPreview_Click(object? sender, EventArgs e)
         {
-            UpdateDataFromInputs();
+            bool hasDataChanges = HasDataChangesExcludingDate();
+            bool isDateChanged = HasDateManuallyChanged();
+
+            if (hasDataChanges && !isDateChanged)
+            {
+                PhieuCanData.NgayInPhieu = DateTime.Now;
+                dtpNgayInPhieu.Value = PhieuCanData.NgayInPhieu;
+            }
+            else if (isDateChanged)
+            {
+                PhieuCanData.NgayInPhieu = dtpNgayInPhieu.Value;
+            }
+            else
+            {
+                PhieuCanData.NgayInPhieu = _origNgayInPhieu;
+            }
+
+            UpdateDataFromInputs(keepCalculatedDate: true);
             PrintService ps = new PrintService(PhieuCanData);
             ps.PrintPreview();
         }
@@ -393,10 +686,31 @@ namespace CanXeApp
             var confirm = CustomMessageBox.Show(msg, title, MessageBoxButtons.YesNo, MessageBoxIcon.Question);
             if (confirm == DialogResult.Yes)
             {
+                _isSavedOrDeleted = true;
                 IsDeleted = true;
                 this.DialogResult = DialogResult.OK;
                 this.Close();
             }
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (!_isSavedOrDeleted && HasUnsavedChanges())
+            {
+                string confirmMsg = CurrentLanguage == "EN"
+                    ? "You have unsaved changes. Are you sure you want to exit without saving?"
+                    : "Bạn đang chỉnh sửa phiếu cân và chưa lưu lại. Bạn có chắc chắn muốn đóng mà không lưu không?";
+                string confirmTitle = CurrentLanguage == "EN" ? "Unsaved Changes" : "Xác nhận thoát";
+
+                var result = CustomMessageBox.Show(confirmMsg, confirmTitle, MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                if (result != DialogResult.Yes)
+                {
+                    e.Cancel = true;
+                    return;
+                }
+            }
+
+            base.OnFormClosing(e);
         }
     }
 }

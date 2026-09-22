@@ -36,7 +36,7 @@ namespace CanXeApp.Controls
 
         public FormattedNumericTextBox()
         {
-            this.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
+            this.Font = new Font("Segoe UI", 12F, FontStyle.Bold);
             this.Text = "0";
         }
 

@@ -46,6 +46,7 @@ namespace CanXeApp
         private Label lblSearch;
         private TextBox txtSearch;
         private Button btnSearch;
+        private Button btnResetFilter;
         private ToolTip toolTipSearch;
 
         // Controls bộ lọc ngày
@@ -63,13 +64,42 @@ namespace CanXeApp
 
         // Controls Biểu đồ thống kê
         private Panel panelLeft;
-        private GroupBox gbChart;
+        private Panel pnlChartWrapper;
+        private Panel pnlChartTitleBar;
+        private Label lblChartTitle;
+        private Button btnToggleChart;
+        private Panel pnlChartContent;
+        private Panel panelChartHeader;
         private Button btnChartTabMonths;
         private Button btnChartTabGoods;
+        private Label lblChartYear;
         private ComboBox cbChartYear;
         private Label lblChartSummary;
         private DoubleBufferedPanel pnlChartCanvas;
         private int _currentChartTab = 0; // 0 = 12 tháng, 1 = Top mặt hàng
+
+        // Controls Toggle Đóng / Mở Bảng thống kê (Mặc định là đóng)
+        private bool _isChartVisible = false;
+
+        // Controls Zoom In / Zoom Out giao diện
+        private float _currentZoom = 1.0f;
+        private Panel pnlZoomControls;
+        private Button btnZoomOut;
+        private Button btnZoomReset;
+        private Button btnZoomIn;
+        private ToolTip? _zoomToolTip;
+
+        private class ControlLayoutInfo
+        {
+            public int X;
+            public int Y;
+            public int Width;
+            public int Height;
+            public float FontSize;
+            public FontStyle FontStyle;
+            public string FontFamily = "Segoe UI";
+        }
+        private readonly Dictionary<Control, ControlLayoutInfo> _baseLayouts = new Dictionary<Control, ControlLayoutInfo>();
 
         // ContextMenuStrip cho danh sách phiếu cân
         private ContextMenuStrip contextMenuDgv;
@@ -81,6 +111,8 @@ namespace CanXeApp
         {
             "Mía", "Dưa", "Phế Liệu", "Keo", "Gỗ", "Lúa", "Đậu Đỏ", "Bắp", "Mì", "Bì Cao Su"
         };
+
+        private System.Windows.Forms.Timer? _realtimeTimer;
 
         public FormMain()
         {
@@ -97,6 +129,20 @@ namespace CanXeApp
             LoadData();
             ResetForm();
 
+            // Realtime timer cập nhật ngày in phiếu
+            _realtimeTimer = new System.Windows.Forms.Timer
+            {
+                Interval = 1000
+            };
+            _realtimeTimer.Tick += (s, e) =>
+            {
+                if (dtpNgayInPhieu != null && !dtpNgayInPhieu.IsUserModified && (_currentPhieuCan == null || _currentPhieuCan.Id == 0))
+                {
+                    dtpNgayInPhieu.Value = DateTime.Now;
+                }
+            };
+            _realtimeTimer.Start();
+
             this.Shown += (s, e) => this.ActiveControl = null;
         }
 
@@ -106,7 +152,7 @@ namespace CanXeApp
             this.Size = new Size(1300, 750);
             this.MinimumSize = new Size(1100, 650);
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.Font = new Font("Segoe UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
+            this.Font = new Font("Segoe UI", 11F, FontStyle.Regular, GraphicsUnit.Point);
             this.BackColor = Color.FromArgb(245, 247, 250);
 
             this.Click += ClearFocus_Click;
@@ -123,13 +169,13 @@ namespace CanXeApp
             panelHeader = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 78,
+                Height = 84,
                 BackColor = Color.FromArgb(24, 119, 242)
             };
             lblHeaderTitle = new Label
             {
                 Text = "TRẠM CÂN THỊ TRẤN HAI RIÊNG",
-                Font = new Font("Segoe UI", 16F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 18F, FontStyle.Bold),
                 ForeColor = Color.White,
                 Location = new Point(20, 12),
                 AutoSize = true
@@ -137,9 +183,9 @@ namespace CanXeApp
             lblHeaderSub = new Label
             {
                 Text = "Đ. Hoàng Hoa Thám - TT. Hai Riêng - X. Sông Hinh - T. Đắk Lắk | SĐT: 0918.172.220",
-                Font = new Font("Segoe UI", 9.5F, FontStyle.Italic),
+                Font = new Font("Segoe UI", 10.5F, FontStyle.Italic),
                 ForeColor = Color.FromArgb(230, 240, 255),
-                Location = new Point(22, 46),
+                Location = new Point(22, 50),
                 AutoSize = true
             };
 
@@ -148,8 +194,7 @@ namespace CanXeApp
             {
                 Text = "🌐 VI (Tiếng Việt)",
                 Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                Location = new Point(panelHeader.Width - 180, 20),
-                Size = new Size(160, 38),
+                Size = new Size(145, 38),
                 BackColor = Color.FromArgb(255, 255, 255),
                 ForeColor = Color.FromArgb(24, 119, 242),
                 FlatStyle = FlatStyle.Flat,
@@ -159,16 +204,92 @@ namespace CanXeApp
             btnSwitchLang.FlatAppearance.BorderSize = 0;
             btnSwitchLang.Click += BtnSwitchLang_Click;
 
+            // Toolbar Zoom In / Zoom Out / Reset 100%
+            pnlZoomControls = new Panel
+            {
+                Size = new Size(155, 38),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                BackColor = Color.Transparent
+            };
+
+            btnZoomOut = new Button
+            {
+                Text = "",
+                Location = new Point(0, 0),
+                Size = new Size(38, 38),
+                BackColor = Color.White,
+                ForeColor = Color.FromArgb(24, 119, 242),
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand
+            };
+            btnZoomOut.FlatAppearance.BorderSize = 0;
+            btnZoomOut.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                float cx = btnZoomOut.Width / 2f;
+                float cy = btnZoomOut.Height / 2f;
+                float halfLen = 6.5f * _currentZoom;
+                float penW = Math.Max(2f, 2.2f * _currentZoom);
+                using var pen = new Pen(Color.FromArgb(24, 119, 242), penW) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+                e.Graphics.DrawLine(pen, cx - halfLen, cy, cx + halfLen, cy);
+            };
+            btnZoomOut.Click += (s, e) => ZoomOut();
+
+            btnZoomReset = new Button
+            {
+                Text = "100%",
+                Location = new Point(42, 0),
+                Size = new Size(70, 38),
+                BackColor = Color.White,
+                ForeColor = Color.FromArgb(24, 119, 242),
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            btnZoomReset.FlatAppearance.BorderSize = 0;
+            btnZoomReset.Click += (s, e) => ZoomReset();
+
+            btnZoomIn = new Button
+            {
+                Text = "",
+                Location = new Point(116, 0),
+                Size = new Size(38, 38),
+                BackColor = Color.White,
+                ForeColor = Color.FromArgb(24, 119, 242),
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand
+            };
+            btnZoomIn.FlatAppearance.BorderSize = 0;
+            btnZoomIn.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                float cx = btnZoomIn.Width / 2f;
+                float cy = btnZoomIn.Height / 2f;
+                float halfLen = 6.5f * _currentZoom;
+                float penW = Math.Max(2f, 2.2f * _currentZoom);
+                using var pen = new Pen(Color.FromArgb(24, 119, 242), penW) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+                e.Graphics.DrawLine(pen, cx - halfLen, cy, cx + halfLen, cy);
+                e.Graphics.DrawLine(pen, cx, cy - halfLen, cx, cy + halfLen);
+            };
+            btnZoomIn.Click += (s, e) => ZoomIn();
+
+            pnlZoomControls.Controls.Add(btnZoomOut);
+            pnlZoomControls.Controls.Add(btnZoomReset);
+            pnlZoomControls.Controls.Add(btnZoomIn);
+
+            _zoomToolTip = new ToolTip { InitialDelay = 200, ReshowDelay = 200 };
+            _zoomToolTip.SetToolTip(btnZoomIn, "Phóng to giao diện (Ctrl + +)");
+            _zoomToolTip.SetToolTip(btnZoomOut, "Thu nhỏ giao diện (Ctrl + -)");
+            _zoomToolTip.SetToolTip(btnZoomReset, "Đặt lại kích thước chuẩn 100% (Ctrl + 0)");
+
             panelHeader.Controls.Add(lblHeaderTitle);
             panelHeader.Controls.Add(lblHeaderSub);
+            panelHeader.Controls.Add(pnlZoomControls);
             panelHeader.Controls.Add(btnSwitchLang);
             this.Controls.Add(panelHeader);
 
-            // Responsive location cho btnSwitchLang khi resize header
-            panelHeader.Resize += (s, e) =>
-            {
-                btnSwitchLang.Location = new Point(panelHeader.Width - 180, 20);
-            };
+            panelHeader.Resize += (s, e) => RepositionHeaderControls();
+            RepositionHeaderControls();
 
             // 2. TableMainLayout (Responsive Dock Fill: 2 cột)
             tableMainLayout = new TableLayoutPanel
@@ -179,7 +300,7 @@ namespace CanXeApp
                 Padding = new Padding(10),
                 BackColor = Color.FromArgb(245, 247, 250)
             };
-            tableMainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 630F));
+            tableMainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 750F));
             tableMainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             tableMainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
@@ -187,28 +308,28 @@ namespace CanXeApp
             gbInput = new GroupBox
             {
                 Text = "THÔNG TIN PHIẾU CÂN XE MỚI",
-                Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 12F, FontStyle.Bold),
                 Dock = DockStyle.Top,
-                Height = 325,
+                Height = 375,
                 ForeColor = Color.FromArgb(30, 40, 60),
                 Margin = new Padding(5)
             };
             gbInput.Click += ClearFocus_Click;
 
-            int y = 30;
-            int lblX1 = 15, txtX1 = 130, txtWidth1 = 145;
-            int lblX2 = 295, txtX2 = 410, txtWidth2 = 185;
+            int y = 32;
+            int lblX1 = 15, txtX1 = 150, txtWidth1 = 190;
+            int lblX2 = 370, txtX2 = 505, txtWidth2 = 225;
 
             // STT & Số xe (Giới hạn 50 ký tự)
             lblSTT = CreateLabel("STT:", lblX1, y);
-            txtSTT = new TextBox { Location = new Point(txtX1, y - 3), Width = txtWidth1, ReadOnly = true, Enabled = false, Font = new Font("Segoe UI", 10F, FontStyle.Bold) };
+            txtSTT = new TextBox { Location = new Point(txtX1, y - 3), Width = txtWidth1, ReadOnly = true, Enabled = false, Font = new Font("Segoe UI", 11.5F, FontStyle.Bold) };
 
             lblSoXe = CreateLabelWithRedAsterisk("Số xe", lblX2, y);
-            txtSoXe = new TextBox { Location = new Point(txtX2, y - 3), Width = txtWidth2, Font = new Font("Segoe UI", 10F, FontStyle.Bold), ForeColor = Color.DarkBlue, MaxLength = 50 };
+            txtSoXe = new TextBox { Location = new Point(txtX2, y - 3), Width = txtWidth2, Font = new Font("Segoe UI", 11.5F, FontStyle.Bold), ForeColor = Color.DarkBlue, MaxLength = 50 };
             txtSoXe.Enter += Input_SelectAllOnEnter;
             txtSoXe.MouseClick += Input_SelectAllOnEnter;
 
-            y += 40;
+            y += 46;
             // Loại hàng & Khách hàng (Giới hạn 50 ký tự)
             lblLoaiHang = CreateLabel("Loại hàng:", lblX1, y);
             cbLoaiHang = new ComboBox
@@ -216,7 +337,7 @@ namespace CanXeApp
                 Location = new Point(txtX1, y - 3),
                 Width = txtWidth1,
                 DropDownStyle = ComboBoxStyle.DropDown,
-                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 11.5F, FontStyle.Bold),
                 MaxLength = 50
             };
             cbLoaiHang.Items.AddRange(_dsLoaiHang);
@@ -224,12 +345,12 @@ namespace CanXeApp
             cbLoaiHang.Enter += Input_SelectAllOnEnter;
 
             lblKhachHang = CreateLabel("Khách hàng:", lblX2, y);
-            txtKhachHang = new TextBox { Location = new Point(txtX2, y - 3), Width = txtWidth2, Font = new Font("Segoe UI", 10F, FontStyle.Bold), MaxLength = 50 };
+            txtKhachHang = new TextBox { Location = new Point(txtX2, y - 3), Width = txtWidth2, Font = new Font("Segoe UI", 11.5F, FontStyle.Bold), MaxLength = 50 };
             txtKhachHang.Leave += TxtKhachHang_Leave;
             txtKhachHang.Enter += Input_SelectAllOnEnter;
             txtKhachHang.MouseClick += Input_SelectAllOnEnter;
 
-            y += 40;
+            y += 46;
             // Khối lượng tổng & Ngày in phiếu
             lblKhoiLuongTong = CreateLabel("KL Tổng (Kg):", lblX1, y);
             numKhoiLuongTong = new FormattedNumericTextBox
@@ -242,7 +363,7 @@ namespace CanXeApp
             lblNgayInPhieu = CreateLabel("Ngày in phiếu:", lblX2, y);
             dtpNgayInPhieu = new VnDateTimePicker { Location = new Point(txtX2, y - 3), Width = txtWidth2, CustomFormat = "dd/MM/yyyy HH:mm", PreventFutureDates = true, Language = _currentLanguage };
 
-            y += 40;
+            y += 46;
             // Khối lượng xe & Kiểu cân
             lblKhoiLuongXe = CreateLabel("KL Xe (Kg):", lblX1, y);
             numKhoiLuongXe = new FormattedNumericTextBox
@@ -253,11 +374,11 @@ namespace CanXeApp
             numKhoiLuongXe.TextChanged += CalculateKLHangRealtime;
 
             lblKieuCan = CreateLabel("Kiểu cân:", lblX2, y);
-            cbKieuCan = new ComboBox { Location = new Point(txtX2, y - 3), Width = txtWidth2, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 10F, FontStyle.Bold) };
+            cbKieuCan = new ComboBox { Location = new Point(txtX2, y - 3), Width = txtWidth2, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 11.5F, FontStyle.Bold) };
             cbKieuCan.Items.AddRange(new object[] { "Cân dịch vụ", "Xuất hàng", "Nhập hàng" });
             cbKieuCan.SelectedIndex = 0;
 
-            y += 40;
+            y += 46;
             // Khối lượng hàng & Số chứng từ (Giới hạn 50 ký tự)
             lblKhoiLuongHang = CreateLabel("KL Hàng (Kg):", lblX1, y);
             txtKhoiLuongHang = new TextBox
@@ -266,29 +387,29 @@ namespace CanXeApp
                 Width = txtWidth1,
                 ReadOnly = true,
                 Enabled = false,
-                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 12F, FontStyle.Bold),
                 ForeColor = Color.White,
                 BackColor = Color.Red
             };
 
             lblSoChungTu = CreateLabel("Số chứng từ:", lblX2, y);
-            txtSoChungTu = new TextBox { Location = new Point(txtX2, y - 3), Width = txtWidth2, Font = new Font("Segoe UI", 10F, FontStyle.Bold), MaxLength = 50 };
+            txtSoChungTu = new TextBox { Location = new Point(txtX2, y - 3), Width = txtWidth2, Font = new Font("Segoe UI", 11.5F, FontStyle.Bold), MaxLength = 50 };
             txtSoChungTu.Enter += Input_SelectAllOnEnter;
             txtSoChungTu.MouseClick += Input_SelectAllOnEnter;
 
-            y += 40;
-            // Ghi chú (Giới hạn 200 ký tự)
+            y += 46;
+            // Ghi chú (Giới hạn 150 ký tự)
             lblGhiChu = CreateLabel("Ghi chú:", lblX1, y);
-            txtGhiChu = new TextBox { Location = new Point(txtX1, y - 3), Width = txtWidth1, Font = new Font("Segoe UI", 10F, FontStyle.Bold), MaxLength = 200 };
+            txtGhiChu = new TextBox { Location = new Point(txtX1, y - 3), Width = txtWidth1, Font = new Font("Segoe UI", 11.5F, FontStyle.Bold), MaxLength = 150 };
             txtGhiChu.Enter += Input_SelectAllOnEnter;
             txtGhiChu.MouseClick += Input_SelectAllOnEnter;
 
-            y += 50;
-            // Buttons
-            btnNew = CreateButton("➕ Tạo Mới", 15, y, 135, Color.FromArgb(40, 167, 69));
-            btnSave = CreateButton("💾 Lưu Phiếu", 160, y, 135, Color.FromArgb(0, 123, 255));
-            btnPrintPreview = CreateButton("👁️ Xem Trước", 305, y, 135, Color.FromArgb(23, 162, 184));
-            btnPrint = CreateButton("🖨️ In Và Lưu Phiếu", 450, y, 155, Color.FromArgb(220, 53, 69));
+            y += 56;
+            // Buttons: 4 nút to rõ ràng, cân đối chiều ngang
+            btnNew = CreateButton("➕ Tạo Mới", 15, y, 160, Color.FromArgb(40, 167, 69));
+            btnSave = CreateButton("💾 Lưu Phiếu", 190, y, 165, Color.FromArgb(0, 123, 255));
+            btnPrintPreview = CreateButton("👁️ Xem Trước", 370, y, 165, Color.FromArgb(23, 162, 184));
+            btnPrint = CreateButton("🖨️ In Và Lưu Phiếu", 550, y, 180, Color.FromArgb(220, 53, 69));
 
             gbInput.Controls.AddRange(new Control[] {
                 lblSTT, txtSTT, lblSoXe, txtSoXe,
@@ -311,12 +432,12 @@ namespace CanXeApp
             panelSearch = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 45
+                Height = 50
             };
             panelSearch.Click += ClearFocus_Click;
 
-            lblSearch = CreateLabel("Từ khóa:", 8, 11);
-            txtSearch = new TextBox { Location = new Point(72, 7), Width = 140, Font = new Font("Segoe UI", 9.5F, FontStyle.Regular), PlaceholderText = "Số xe, hàng..." };
+            lblSearch = CreateLabel("Từ khóa:", 8, 13);
+            txtSearch = new TextBox { Location = new Point(80, 8), Width = 155, Font = new Font("Segoe UI", 11F, FontStyle.Regular), PlaceholderText = "Số xe, hàng..." };
             txtSearch.Enter += Input_SelectAllOnEnter;
             txtSearch.MouseClick += Input_SelectAllOnEnter;
 
@@ -335,15 +456,16 @@ namespace CanXeApp
             chkFilterDate = new CheckBox
             {
                 Text = "Lọc theo ngày:",
-                Location = new Point(228, 9),
+                Location = new Point(248, 12),
                 AutoSize = true,
-                Checked = false
+                Checked = false,
+                Font = new Font("Segoe UI", 11F, FontStyle.Regular)
             };
 
             dtpFilterFrom = new VnDateTimePicker
             {
-                Location = new Point(350, 6),
-                Width = 115,
+                Location = new Point(375, 8),
+                Width = 135,
                 CustomFormat = "dd/MM/yyyy",
                 Enabled = false,
                 PreventFutureDates = true,
@@ -351,12 +473,12 @@ namespace CanXeApp
                 Language = _currentLanguage
             };
 
-            lblFilterTo = CreateLabel("đến", 475, 11);
+            lblFilterTo = CreateLabel("đến", 518, 13);
 
             dtpFilterTo = new VnDateTimePicker
             {
-                Location = new Point(512, 6),
-                Width = 115,
+                Location = new Point(560, 8),
+                Width = 135,
                 CustomFormat = "dd/MM/yyyy",
                 Enabled = false,
                 PreventFutureDates = true,
@@ -364,16 +486,24 @@ namespace CanXeApp
                 Language = _currentLanguage
             };
 
-            btnSearch = CreateButton("🔍 Tìm kiếm", 638, 5, 95, Color.FromArgb(108, 117, 125));
-            btnSearch.Height = 31;
+            btnSearch = CreateButton("🔍 Tìm", 705, 7, 85, Color.FromArgb(108, 117, 125));
+            btnSearch.Height = 35;
+            btnSearch.Font = new Font("Segoe UI", 10.5F, FontStyle.Bold);
+
+            btnResetFilter = CreateButton("🔄 Bỏ lọc", 798, 7, 95, Color.FromArgb(235, 240, 248));
+            btnResetFilter.Height = 35;
+            btnResetFilter.Font = new Font("Segoe UI", 10.5F, FontStyle.Bold);
+            btnResetFilter.ForeColor = Color.FromArgb(51, 65, 85);
+            btnResetFilter.FlatAppearance.BorderColor = Color.FromArgb(203, 213, 225);
+            btnResetFilter.FlatAppearance.BorderSize = 1;
 
             btnPrintSelected = new Button
             {
-                Location = new Point(panelSearch.Width - 195, 5),
-                Size = new Size(185, 31),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                Location = new Point(panelSearch.Width - 215, 7),
+                Size = new Size(205, 35),
+                Anchor = AnchorStyles.None,
                 FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
                 Cursor = Cursors.Default,
                 Enabled = false
             };
@@ -387,6 +517,8 @@ namespace CanXeApp
                 dtpFilterTo.Enabled = chkFilterDate.Checked;
             };
 
+            btnResetFilter.Click += (s, e) => ResetSearchAndFilter();
+
             panelSearch.Controls.Add(lblSearch);
             panelSearch.Controls.Add(txtSearch);
             panelSearch.Controls.Add(chkFilterDate);
@@ -394,7 +526,11 @@ namespace CanXeApp
             panelSearch.Controls.Add(lblFilterTo);
             panelSearch.Controls.Add(dtpFilterTo);
             panelSearch.Controls.Add(btnSearch);
+            panelSearch.Controls.Add(btnResetFilter);
             panelSearch.Controls.Add(btnPrintSelected);
+
+            panelSearch.Resize += (s, e) => RepositionSearchFilterControls();
+            RepositionSearchFilterControls();
 
             _actionToolTip = new ToolTip { InitialDelay = 100, ReshowDelay = 100 };
 
@@ -408,13 +544,19 @@ namespace CanXeApp
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
                 BackgroundColor = Color.White,
                 ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.EnableResizing,
-                ColumnHeadersHeight = 34,
-                RowTemplate = { Height = 32 },
+                ColumnHeadersHeight = 40,
+                RowTemplate = { Height = 38 },
                 RowHeadersVisible = false,
-                BorderStyle = BorderStyle.None,
-                CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
-                GridColor = Color.FromArgb(235, 238, 242)
+                BorderStyle = BorderStyle.FixedSingle,
+                CellBorderStyle = DataGridViewCellBorderStyle.None,
+                GridColor = Color.FromArgb(180, 190, 205),
+                Font = new Font("Segoe UI", 11F, FontStyle.Regular)
             };
+            typeof(DataGridView).InvokeMember("DoubleBuffered",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.SetProperty,
+                null, dgvPhieuCan, new object[] { true });
+            dgvPhieuCan.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
+            dgvPhieuCan.DefaultCellStyle.Font = new Font("Segoe UI", 11F, FontStyle.Regular);
 
             // Bỏ focus row màu xanh: gán màu selection trùng với màu nền dòng bình thường
             dgvPhieuCan.DefaultCellStyle.SelectionBackColor = Color.White;
@@ -427,6 +569,7 @@ namespace CanXeApp
 
             dgvPhieuCan.SelectionChanged += (s, e) => dgvPhieuCan.ClearSelection();
             dgvPhieuCan.DataBindingComplete += (s, e) => dgvPhieuCan.ClearSelection();
+            dgvPhieuCan.CellFormatting += DgvPhieuCan_CellFormatting;
             dgvPhieuCan.CurrentCellDirtyStateChanged += DgvPhieuCan_CurrentCellDirtyStateChanged;
             dgvPhieuCan.CellValueChanged += DgvPhieuCan_CellValueChanged;
             dgvPhieuCan.CellPainting += DgvPhieuCan_CellPainting;
@@ -466,30 +609,71 @@ namespace CanXeApp
                 Margin = new Padding(0)
             };
 
-            // GroupBox Biểu đồ thống kê
-            gbChart = new GroupBox
-            {
-                Text = "📊 THỐNG KÊ HOẠT ĐỘNG CÂN",
-                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
-                Dock = DockStyle.Fill,
-                ForeColor = Color.FromArgb(30, 40, 60),
-                Margin = new Padding(5)
-            };
-
-            Panel panelChartHeader = new Panel
+            // Card Biểu đồ thống kê
+            pnlChartWrapper = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 38,
+                Height = 42,
+                Margin = new Padding(5),
+                BackColor = Color.FromArgb(245, 247, 250)
+            };
+
+            pnlChartTitleBar = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 40,
+                BackColor = Color.Transparent
+            };
+
+            lblChartTitle = new Label
+            {
+                Text = "📊 THỐNG KÊ HOẠT ĐỘNG CÂN",
+                Font = new Font("Segoe UI", 11.5F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(30, 40, 60),
+                Location = new Point(8, 8),
+                AutoSize = true,
+                Cursor = Cursors.Hand
+            };
+            lblChartTitle.Click += (s, e) => ToggleChartVisibility();
+
+            btnToggleChart = new Button
+            {
+                Text = "▼ Mở",
+                Size = new Size(85, 28),
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
+                BackColor = Color.FromArgb(24, 119, 242),
+                ForeColor = Color.White,
+                Cursor = Cursors.Hand
+            };
+            btnToggleChart.FlatAppearance.BorderSize = 0;
+            btnToggleChart.Location = new Point(lblChartTitle.Right + 12, 5);
+            btnToggleChart.Click += (s, e) => ToggleChartVisibility();
+
+            pnlChartTitleBar.Controls.Add(lblChartTitle);
+            pnlChartTitleBar.Controls.Add(btnToggleChart);
+
+            pnlChartContent = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.White,
+                BorderStyle = BorderStyle.FixedSingle
+            };
+
+            panelChartHeader = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 44,
                 BackColor = Color.Transparent
             };
 
             btnChartTabMonths = new Button
             {
                 Text = "📅 Số phiếu 12 tháng",
-                Location = new Point(10, 5),
-                Size = new Size(150, 28),
+                Location = new Point(10, 6),
+                Size = new Size(175, 32),
                 FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
                 Cursor = Cursors.Hand
             };
             btnChartTabMonths.FlatAppearance.BorderSize = 0;
@@ -498,30 +682,30 @@ namespace CanXeApp
             btnChartTabGoods = new Button
             {
                 Text = "📦 Top mặt hàng",
-                Location = new Point(165, 5),
-                Size = new Size(135, 28),
+                Location = new Point(192, 6),
+                Size = new Size(155, 32),
                 FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
                 Cursor = Cursors.Hand
             };
             btnChartTabGoods.FlatAppearance.BorderSize = 0;
             btnChartTabGoods.Click += (s, e) => SetChartTab(1);
 
-            Label lblChartYear = new Label
+            lblChartYear = new Label
             {
                 Text = "Năm:",
-                Location = new Point(310, 9),
+                Location = new Point(358, 11),
                 AutoSize = true,
-                Font = new Font("Segoe UI", 9F, FontStyle.Regular),
+                Font = new Font("Segoe UI", 10.5F, FontStyle.Regular),
                 ForeColor = Color.FromArgb(70, 80, 95)
             };
 
             cbChartYear = new ComboBox
             {
-                Location = new Point(350, 6),
-                Width = 75,
+                Location = new Point(405, 8),
+                Width = 85,
                 DropDownStyle = ComboBoxStyle.DropDownList,
-                Font = new Font("Segoe UI", 9F, FontStyle.Bold)
+                Font = new Font("Segoe UI", 10.5F, FontStyle.Bold)
             };
             cbChartYear.SelectedIndexChanged += (s, e) => {
                 UpdateChartSummaryText();
@@ -530,9 +714,9 @@ namespace CanXeApp
 
             lblChartSummary = new Label
             {
-                Location = new Point(432, 9),
+                Location = new Point(500, 11),
                 AutoSize = true,
-                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(24, 119, 242)
             };
 
@@ -550,12 +734,18 @@ namespace CanXeApp
             };
             pnlChartCanvas.Paint += PnlChartCanvas_Paint;
 
-            gbChart.Controls.Add(pnlChartCanvas);
-            gbChart.Controls.Add(panelChartHeader);
+            pnlChartContent.Controls.Add(pnlChartCanvas);
+            pnlChartContent.Controls.Add(panelChartHeader);
 
-            panelLeft.Controls.Add(gbChart);
+            pnlChartWrapper.Controls.Add(pnlChartContent);
+            pnlChartWrapper.Controls.Add(pnlChartTitleBar);
+
+            panelLeft.Controls.Add(pnlChartWrapper);
             panelLeft.Controls.Add(gbInput);
-            gbChart.BringToFront();
+            gbInput.SendToBack();
+
+            // Mặc định là đóng bảng thống kê
+            SetChartVisibility(false);
 
             tableMainLayout.Controls.Add(panelLeft, 0, 0);
             tableMainLayout.Controls.Add(panelRight, 1, 0);
@@ -564,13 +754,16 @@ namespace CanXeApp
             tableMainLayout.BringToFront();
 
             // Events for buttons
-            btnNew.Click += (s, e) => ResetForm();
+            btnNew.Click += BtnNew_Click;
             btnSave.Click += BtnSave_Click;
             btnPrintPreview.Click += BtnPrintPreview_Click;
             btnPrint.Click += BtnPrint_Click;
 
             btnSearch.Click += (s, e) => LoadDataWithFilter();
             txtSearch.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) LoadDataWithFilter(); };
+
+            // Ghi nhận trạng thái gốc của các control để phóng to / thu nhỏ không bao giờ bị lệch
+            CaptureBaseLayouts();
         }
 
         private void BtnSwitchLang_Click(object? sender, EventArgs e)
@@ -590,7 +783,7 @@ namespace CanXeApp
                 btnSwitchLang.Text = "🌐 EN (English)";
                 gbInput.Text = "NEW WEIGHING TICKET INFO";
                 lblSTT.Text = "No:";
-                UpdateSoXeLabelPosition("Plate No", 295, 30);
+                UpdateSoXeLabelPosition("Plate No", 370, 32);
                 lblLoaiHang.Text = "Goods Type:";
                 lblKhachHang.Text = "Customer:";
                 lblKhoiLuongTong.Text = "Gross Wt (Kg):";
@@ -611,6 +804,7 @@ namespace CanXeApp
                 chkFilterDate.Text = "Filter by date:";
                 lblFilterTo.Text = "to";
                 btnSearch.Text = "🔍 Search";
+                if (btnResetFilter != null) btnResetFilter.Text = "🔄 Reset";
 
                 menuItemEdit.Text = "✏️ Edit this ticket";
                 menuItemDelete.Text = "🗑️ Delete this ticket";
@@ -619,13 +813,16 @@ namespace CanXeApp
                 cbKieuCan.Items.Clear();
                 cbKieuCan.Items.AddRange(new object[] { "Service Weighing", "Export Goods", "Import Goods" });
                 if (selKieuCan >= 0 && selKieuCan < cbKieuCan.Items.Count) cbKieuCan.SelectedIndex = selKieuCan;
+
+                if (lblChartTitle != null) lblChartTitle.Text = "📊 WEIGHING ACTIVITY STATISTICS";
+                if (lblChartYear != null) lblChartYear.Text = "Year:";
             }
             else
             {
                 btnSwitchLang.Text = "🌐 VI (Tiếng Việt)";
                 gbInput.Text = "THÔNG TIN PHIẾU CÂN XE MỚI";
                 lblSTT.Text = "STT:";
-                UpdateSoXeLabelPosition("Số xe", 295, 30);
+                UpdateSoXeLabelPosition("Số xe", 370, 32);
                 lblLoaiHang.Text = "Loại hàng:";
                 lblKhachHang.Text = "Khách hàng:";
                 lblKhoiLuongTong.Text = "KL Tổng (Kg):";
@@ -645,7 +842,8 @@ namespace CanXeApp
                 txtSearch.PlaceholderText = "Số xe, Loại hàng, Khách hàng...";
                 chkFilterDate.Text = "Lọc theo ngày:";
                 lblFilterTo.Text = "đến";
-                btnSearch.Text = "🔍 Tìm kiếm";
+                btnSearch.Text = "🔍 Tìm";
+                if (btnResetFilter != null) btnResetFilter.Text = "🔄 Bỏ lọc";
 
                 menuItemEdit.Text = "✏️ Chỉnh sửa phiếu này";
                 menuItemDelete.Text = "🗑️ Xóa phiếu này";
@@ -654,58 +852,91 @@ namespace CanXeApp
                 cbKieuCan.Items.Clear();
                 cbKieuCan.Items.AddRange(new object[] { "Cân dịch vụ", "Xuất hàng", "Nhập hàng" });
                 if (selKieuCan >= 0 && selKieuCan < cbKieuCan.Items.Count) cbKieuCan.SelectedIndex = selKieuCan;
+
+                if (lblChartTitle != null) lblChartTitle.Text = "📊 THỐNG KÊ HOẠT ĐỘNG CÂN";
+                if (lblChartYear != null) lblChartYear.Text = "Năm:";
+            }
+
+            if (btnChartTabMonths != null) btnChartTabMonths.Text = _currentLanguage == "EN" ? "📅 Monthly Tickets" : "📅 Số phiếu 12 tháng";
+            if (btnChartTabGoods != null) btnChartTabGoods.Text = _currentLanguage == "EN" ? "📦 Top Commodities" : "📦 Top mặt hàng";
+            UpdateChartSummaryText();
+            pnlChartCanvas?.Invalidate();
+
+            SetChartVisibility(_isChartVisible);
+
+            if (_zoomToolTip != null)
+            {
+                if (btnZoomIn != null) _zoomToolTip.SetToolTip(btnZoomIn, _currentLanguage == "EN" ? "Zoom In (Ctrl + +)" : "Phóng to giao diện (Ctrl + +)");
+                if (btnZoomOut != null) _zoomToolTip.SetToolTip(btnZoomOut, _currentLanguage == "EN" ? "Zoom Out (Ctrl + -)" : "Thu nhỏ giao diện (Ctrl + -)");
+                if (btnZoomReset != null) _zoomToolTip.SetToolTip(btnZoomReset, _currentLanguage == "EN" ? "Reset Zoom 100% (Ctrl + 0)" : "Đặt lại kích thước chuẩn 100% (Ctrl + 0)");
+                if (btnToggleChart != null) _zoomToolTip.SetToolTip(btnToggleChart, _currentLanguage == "EN" ? "Open/Close Statistics Chart" : "Đóng / Mở bảng thống kê hoạt động cân");
             }
 
             UpdatePrintSelectedButtonState();
+            RepositionSearchFilterControls();
             LoadDataWithFilter();
         }
 
         private Label CreateLabel(string text, int x, int y)
         {
-            var lbl = new Label { Text = text, Location = new Point(x, y), AutoSize = true, Font = new Font("Segoe UI", 9.5F, FontStyle.Regular) };
+            var lbl = new Label { Text = text, Location = new Point(x, y), AutoSize = true, Font = new Font("Segoe UI", 11F, FontStyle.Regular) };
             lbl.Click += ClearFocus_Click;
             return lbl;
         }
 
-        private Label lblSoXeAsterisk, lblSoXeClose;
-
         private Label CreateLabelWithRedAsterisk(string text, int x, int y)
         {
-            lblSoXe = new Label { Text = text + " (", Location = new Point(x, y), AutoSize = true, Font = new Font("Segoe UI", 9.5F) };
-            lblSoXeAsterisk = new Label { Text = "*", Location = new Point(x + 40, y), AutoSize = true, Font = new Font("Segoe UI", 9.5F, FontStyle.Bold), ForeColor = Color.Red };
-            lblSoXeClose = new Label { Text = "):", Location = new Point(x + 48, y), AutoSize = true, Font = new Font("Segoe UI", 9.5F) };
-
+            lblSoXe = new Label
+            {
+                Text = "",
+                Location = new Point(x, y),
+                Size = new Size(130, 26),
+                Font = new Font("Segoe UI", 11F, FontStyle.Regular),
+                ForeColor = Color.FromArgb(30, 40, 60),
+                BackColor = Color.Transparent
+            };
+            lblSoXe.Paint += LblSoXe_Paint;
             lblSoXe.Click += ClearFocus_Click;
-            lblSoXeAsterisk.Click += ClearFocus_Click;
-            lblSoXeClose.Click += ClearFocus_Click;
-
-            gbInput.Controls.Add(lblSoXeAsterisk);
-            gbInput.Controls.Add(lblSoXeClose);
             UpdateSoXeLabelPosition(text, x, y);
             return lblSoXe;
         }
 
+        private void LblSoXe_Paint(object? sender, PaintEventArgs e)
+        {
+            if (lblSoXe == null) return;
+            e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+            string prefix = (_currentLanguage == "EN" ? "Plate No" : "Số xe") + " (";
+            string star = "*";
+            string suffix = "):";
+
+            Font font = lblSoXe.Font;
+            using var fontStar = new Font(font.FontFamily, font.SizeInPoints, FontStyle.Bold);
+
+            Size szPrefix = TextRenderer.MeasureText(e.Graphics, prefix, font, Size.Empty, TextFormatFlags.NoPadding);
+            Size szStar = TextRenderer.MeasureText(e.Graphics, star, fontStar, Size.Empty, TextFormatFlags.NoPadding);
+
+            int curX = 0;
+            int curY = 0;
+
+            TextRenderer.DrawText(e.Graphics, prefix, font, new Point(curX, curY), lblSoXe.ForeColor, TextFormatFlags.NoPadding);
+            curX += szPrefix.Width;
+
+            TextRenderer.DrawText(e.Graphics, star, fontStar, new Point(curX, curY), Color.Red, TextFormatFlags.NoPadding);
+            curX += szStar.Width;
+
+            TextRenderer.DrawText(e.Graphics, suffix, font, new Point(curX, curY), lblSoXe.ForeColor, TextFormatFlags.NoPadding);
+        }
+
         private void UpdateSoXeLabelPosition(string mainText, int x, int y)
         {
-            if (lblSoXe == null || lblSoXeAsterisk == null || lblSoXeClose == null) return;
-
-            lblSoXe.Text = mainText + " (";
-            using (Graphics g = gbInput.CreateGraphics())
-            {
-                SizeF szMain = g.MeasureString(lblSoXe.Text, lblSoXe.Font);
-                int mainWidth = (int)szMain.Width - 4;
-
-                lblSoXeAsterisk.Location = new Point(x + mainWidth, y);
-                SizeF szAst = g.MeasureString("*", lblSoXeAsterisk.Font);
-                int astWidth = (int)szAst.Width - 6;
-
-                lblSoXeClose.Location = new Point(x + mainWidth + astWidth, y);
-            }
+            if (lblSoXe == null) return;
+            lblSoXe.Location = new Point(x, y);
+            lblSoXe.Invalidate();
         }
 
         private Button CreateButton(string text, int x, int y, int width, Color backColor)
         {
-            return new Button { Text = text, Location = new Point(x, y), Size = new Size(width, 38), BackColor = backColor, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9.5F, FontStyle.Bold), Cursor = Cursors.Hand };
+            return new Button { Text = text, Location = new Point(x, y), Size = new Size(width, 42), BackColor = backColor, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 11F, FontStyle.Bold), Cursor = Cursors.Hand };
         }
 
         private void ClearFocus_Click(object? sender, EventArgs e)
@@ -768,6 +999,41 @@ namespace CanXeApp
             }
         }
 
+        private bool HasUnsavedNewTicket()
+        {
+            if (_currentPhieuCan != null && _currentPhieuCan.Id != 0) return false;
+
+            if (!string.IsNullOrWhiteSpace(txtSoXe.Text)) return true;
+            if (!string.IsNullOrWhiteSpace(txtKhachHang.Text)) return true;
+            if (numKhoiLuongTong.Value > 0) return true;
+            if (numKhoiLuongXe.Value > 0) return true;
+            if (!string.IsNullOrWhiteSpace(txtSoChungTu.Text)) return true;
+            if (!string.IsNullOrWhiteSpace(txtGhiChu.Text)) return true;
+            if (cbLoaiHang.Text.Trim() != "Bì Cao Su" && !string.IsNullOrWhiteSpace(cbLoaiHang.Text)) return true;
+            if (cbKieuCan.SelectedIndex > 0) return true;
+            if (dtpNgayInPhieu.IsUserModified) return true;
+
+            return false;
+        }
+
+        private void BtnNew_Click(object? sender, EventArgs e)
+        {
+            if (HasUnsavedNewTicket())
+            {
+                string confirmMsg = _currentLanguage == "EN"
+                    ? "You are creating a new ticket with unsaved information. Are you sure you want to discard it and create a new one?"
+                    : "Bạn đang nhập thông tin phiếu cân mới chưa được lưu lại. Bạn có chắc chắn muốn bỏ qua để tạo mới không?";
+                string confirmTitle = _currentLanguage == "EN" ? "Discard Unsaved Ticket" : "Xác nhận tạo mới";
+
+                if (CustomMessageBox.Show(confirmMsg, confirmTitle, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                {
+                    return;
+                }
+            }
+
+            ResetForm();
+        }
+
         private void ResetForm()
         {
             _currentPhieuCan = new PhieuCan
@@ -777,12 +1043,13 @@ namespace CanXeApp
                 NgayInPhieu = DateTime.Now
             };
 
-            txtSTT.Text = _currentPhieuCan.STT.ToString();
+            txtSTT.Text = $"Xe {_currentPhieuCan.STT}";
             txtSoXe.Text = "";
             cbLoaiHang.Text = "Bì Cao Su";
             txtKhachHang.Text = "";
             numKhoiLuongTong.Value = 0;
             numKhoiLuongXe.Value = 0;
+            dtpNgayInPhieu.IsUserModified = false;
             dtpNgayInPhieu.Value = DateTime.Now;
             txtSoChungTu.Text = "";
             txtGhiChu.Text = "";
@@ -799,6 +1066,19 @@ namespace CanXeApp
             DateTime? toDate = chkFilterDate.Checked ? dtpFilterTo.Value.Date : null;
 
             LoadData(keyword, fromDate, toDate);
+        }
+
+        private void ResetSearchAndFilter()
+        {
+            txtSearch.Text = "";
+            chkFilterDate.Checked = false;
+            dtpFilterFrom.Value = DateTime.Now;
+            dtpFilterTo.Value = DateTime.Now;
+            dtpFilterFrom.Enabled = false;
+            dtpFilterTo.Enabled = false;
+
+            LoadData("", null, null);
+            this.ActiveControl = null;
         }
 
         private void LoadData(string keyword = "", DateTime? fromDate = null, DateTime? toDate = null)
@@ -833,7 +1113,7 @@ namespace CanXeApp
             {
                 dgvPhieuCan.Columns["STT"].HeaderText = _currentLanguage == "EN" ? "No" : "STT";
                 dgvPhieuCan.Columns["STT"].AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
-                dgvPhieuCan.Columns["STT"].Width = 55;
+                dgvPhieuCan.Columns["STT"].Width = (int)Math.Round(72 * _currentZoom);
             }
 
             if (dgvPhieuCan.Columns["SoXe"] != null) dgvPhieuCan.Columns["SoXe"].HeaderText = _currentLanguage == "EN" ? "Plate No" : "Số xe";
@@ -867,9 +1147,11 @@ namespace CanXeApp
                 dgvPhieuCan.Columns["NgayInPhieu"].DefaultCellStyle.Format = "dd/MM/yyyy HH:mm";
             }
 
-            // Đồng bộ trạng thái checkbox từ _selectedPhieuIds
+            // Đồng bộ trạng thái checkbox từ _selectedPhieuIds và cập nhật chiều cao dòng theo zoom
+            int currentGridRowH = (int)Math.Round(38 * _currentZoom);
             foreach (DataGridViewRow row in dgvPhieuCan.Rows)
             {
+                row.Height = currentGridRowH;
                 if (row.DataBoundItem is PhieuCan item)
                 {
                     row.Cells["colSelect"].Value = _selectedPhieuIds.Contains(item.Id);
@@ -889,7 +1171,7 @@ namespace CanXeApp
                 {
                     Name = "colSelect",
                     HeaderText = "",
-                    Width = 36,
+                    Width = (int)Math.Round(42 * _currentZoom),
                     AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
                     Resizable = DataGridViewTriState.False,
                     ReadOnly = false
@@ -904,7 +1186,7 @@ namespace CanXeApp
                 {
                     Name = "colAction",
                     HeaderText = "",
-                    Width = 115,
+                    Width = (int)Math.Round(135 * _currentZoom),
                     AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
                     Resizable = DataGridViewTriState.False,
                     ReadOnly = true
@@ -970,6 +1252,15 @@ namespace CanXeApp
                         MessageBox.Show(successMsg, _currentLanguage == "EN" ? "Success" : "Thành công", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
                 }
+            }
+        }
+
+        private void DgvPhieuCan_CellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
+        {
+            if (e.RowIndex >= 0 && e.ColumnIndex >= 0 && dgvPhieuCan.Columns[e.ColumnIndex].Name == "STT" && e.Value != null)
+            {
+                e.Value = $"Xe {e.Value}";
+                e.FormattingApplied = true;
             }
         }
 
@@ -1043,43 +1334,79 @@ namespace CanXeApp
 
         private void DgvPhieuCan_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
         {
-            // 1. Vẽ Checkbox Chọn tất cả ở Header
-            if (e.RowIndex == -1 && e.ColumnIndex >= 0 && dgvPhieuCan.Columns[e.ColumnIndex].Name == "colSelect")
+            if (e.RowIndex < -1 || e.ColumnIndex < 0) return;
+
+            Color gridLineColor = Color.FromArgb(180, 190, 205);
+
+            // 1. Header Cells (RowIndex == -1)
+            if (e.RowIndex == -1)
             {
-                e.PaintBackground(e.CellBounds, true);
-                int cbSize = 14;
-                int cbX = e.CellBounds.X + (e.CellBounds.Width - cbSize) / 2;
-                int cbY = e.CellBounds.Y + (e.CellBounds.Height - cbSize) / 2;
-                Rectangle cbRect = new Rectangle(cbX, cbY, cbSize, cbSize);
+                e.Paint(e.CellBounds, DataGridViewPaintParts.All & ~DataGridViewPaintParts.Focus & ~DataGridViewPaintParts.Border);
 
-                bool allChecked = dgvPhieuCan.Rows.Count > 0 &&
-                    dgvPhieuCan.Rows.Cast<DataGridViewRow>().All(r => Convert.ToBoolean(r.Cells["colSelect"].Value));
+                if (dgvPhieuCan.Columns[e.ColumnIndex].Name == "colSelect")
+                {
+                    int cbSize = (int)Math.Round(16 * _currentZoom);
+                    int cbX = e.CellBounds.X + (e.CellBounds.Width - cbSize) / 2;
+                    int cbY = e.CellBounds.Y + (e.CellBounds.Height - cbSize) / 2;
+                    Rectangle cbRect = new Rectangle(cbX, cbY, cbSize, cbSize);
 
-                ButtonState state = allChecked ? ButtonState.Checked : ButtonState.Normal;
-                ControlPaint.DrawCheckBox(e.Graphics, cbRect, state);
+                    bool allChecked = dgvPhieuCan.Rows.Count > 0 &&
+                        dgvPhieuCan.Rows.Cast<DataGridViewRow>().All(r => Convert.ToBoolean(r.Cells["colSelect"].Value));
+
+                    ButtonState state = allChecked ? ButtonState.Checked : ButtonState.Normal;
+                    ControlPaint.DrawCheckBox(e.Graphics, cbRect, state);
+                }
+
+                // Đường viền Header: dưới và phải
+                using (var pen = new Pen(gridLineColor, 1))
+                {
+                    e.Graphics.DrawLine(pen, e.CellBounds.Left, e.CellBounds.Bottom - 1, e.CellBounds.Right, e.CellBounds.Bottom - 1);
+                    e.Graphics.DrawLine(pen, e.CellBounds.Right - 1, e.CellBounds.Top, e.CellBounds.Right - 1, e.CellBounds.Bottom - 1);
+                    if (e.ColumnIndex == 0)
+                    {
+                        e.Graphics.DrawLine(pen, e.CellBounds.Left, e.CellBounds.Top, e.CellBounds.Left, e.CellBounds.Bottom - 1);
+                    }
+                }
 
                 e.Handled = true;
                 return;
             }
 
-            // 2. Vẽ 3 nút icon (Xem trước, Sửa, In) ở cột Action
-            if (e.RowIndex >= 0 && e.ColumnIndex >= 0 && dgvPhieuCan.Columns[e.ColumnIndex].Name == "colAction")
+            // 2. Data Cells (RowIndex >= 0)
+            if (e.RowIndex >= 0)
             {
-                e.PaintBackground(e.CellBounds, true);
+                e.Paint(e.CellBounds, DataGridViewPaintParts.All & ~DataGridViewPaintParts.Focus & ~DataGridViewPaintParts.Border);
 
-                int btnW = 28;
-                int btnH = 24;
-                int gap = 5;
-                int startX = e.CellBounds.X + (e.CellBounds.Width - (btnW * 3 + gap * 2)) / 2;
-                int startY = e.CellBounds.Y + (e.CellBounds.Height - btnH) / 2;
+                // Cột Action: vẽ 3 nút icon (Xem trước, Sửa, In)
+                if (dgvPhieuCan.Columns[e.ColumnIndex].Name == "colAction")
+                {
+                    int btnW = (int)Math.Round(34 * _currentZoom);
+                    int btnH = (int)Math.Round(28 * _currentZoom);
+                    int gap = (int)Math.Round(6 * _currentZoom);
+                    int startX = e.CellBounds.X + (e.CellBounds.Width - (btnW * 3 + gap * 2)) / 2;
+                    int startY = e.CellBounds.Y + (e.CellBounds.Height - btnH) / 2;
 
-                Rectangle rcPreview = new Rectangle(startX, startY, btnW, btnH);
-                Rectangle rcEdit = new Rectangle(startX + btnW + gap, startY, btnW, btnH);
-                Rectangle rcPrint = new Rectangle(startX + (btnW + gap) * 2, startY, btnW, btnH);
+                    Rectangle rcPreview = new Rectangle(startX, startY, btnW, btnH);
+                    Rectangle rcEdit = new Rectangle(startX + btnW + gap, startY, btnW, btnH);
+                    Rectangle rcPrint = new Rectangle(startX + (btnW + gap) * 2, startY, btnW, btnH);
 
-                DrawActionBtn(e.Graphics, rcPreview, "preview", Color.FromArgb(232, 244, 253), Color.FromArgb(145, 202, 255));
-                DrawActionBtn(e.Graphics, rcEdit, "edit", Color.FromArgb(254, 244, 230), Color.FromArgb(254, 215, 170));
-                DrawActionBtn(e.Graphics, rcPrint, "print", Color.FromArgb(235, 247, 238), Color.FromArgb(163, 230, 185));
+                    DrawActionBtn(e.Graphics, rcPreview, "preview", Color.FromArgb(232, 244, 253), Color.FromArgb(145, 202, 255));
+                    DrawActionBtn(e.Graphics, rcEdit, "edit", Color.FromArgb(254, 244, 230), Color.FromArgb(254, 215, 170));
+                    DrawActionBtn(e.Graphics, rcPrint, "print", Color.FromArgb(235, 247, 238), Color.FromArgb(163, 230, 185));
+                }
+
+                // Luôn vẽ đường kẻ dưới và phải rõ ràng cho TẤT CẢ các cell:
+                // - Đảm bảo mọi hàng (đặc biệt dòng cuối cùng) luôn có viền ngang sắc nét, liền mạch
+                // - Không bị mờ hay biến mất khi zoom
+                using (var pen = new Pen(gridLineColor, 1))
+                {
+                    e.Graphics.DrawLine(pen, e.CellBounds.Left, e.CellBounds.Bottom - 1, e.CellBounds.Right, e.CellBounds.Bottom - 1);
+                    e.Graphics.DrawLine(pen, e.CellBounds.Right - 1, e.CellBounds.Top, e.CellBounds.Right - 1, e.CellBounds.Bottom - 1);
+                    if (e.ColumnIndex == 0)
+                    {
+                        e.Graphics.DrawLine(pen, e.CellBounds.Left, e.CellBounds.Top, e.CellBounds.Left, e.CellBounds.Bottom - 1);
+                    }
+                }
 
                 e.Handled = true;
                 return;
@@ -1097,46 +1424,54 @@ namespace CanXeApp
 
             float cx = rect.X + rect.Width / 2f;
             float cy = rect.Y + rect.Height / 2f;
+            float z = _currentZoom;
 
             if (actionType == "preview") // Icon mắt (Xem trước) căn giữa tuyệt đối
             {
-                using var penEye = new Pen(Color.FromArgb(24, 119, 242), 1.6f);
+                using var penEye = new Pen(Color.FromArgb(24, 119, 242), 1.8f * z);
                 using var brushPupil = new SolidBrush(Color.FromArgb(24, 119, 242));
 
                 using var path = new GraphicsPath();
-                path.AddArc(cx - 7.5f, cy - 6.5f, 15f, 11f, 25, 130);
-                path.AddArc(cx - 7.5f, cy - 4.5f, 15f, 11f, 205, 130);
+                path.AddArc(cx - 8.5f * z, cy - 7f * z, 17f * z, 12f * z, 25, 130);
+                path.AddArc(cx - 8.5f * z, cy - 5f * z, 17f * z, 12f * z, 205, 130);
                 path.CloseFigure();
                 g.DrawPath(penEye, path);
 
-                g.FillEllipse(brushPupil, cx - 2.2f, cy - 2.2f, 4.4f, 4.4f);
+                g.FillEllipse(brushPupil, cx - 2.5f * z, cy - 2.5f * z, 5f * z, 5f * z);
             }
-            else if (actionType == "edit") // Icon bút chì (Chỉnh sửa)
+            else if (actionType == "edit") // Icon bút chì (Chỉnh sửa) sắc nét, cân đối
             {
-                using var penPencil = new Pen(Color.FromArgb(217, 119, 6), 1.6f);
-                using var brushTip = new SolidBrush(Color.FromArgb(217, 119, 6));
+                using var penPencil = new Pen(Color.FromArgb(217, 119, 6), 1.7f * z);
+                using var brushPencil = new SolidBrush(Color.FromArgb(217, 119, 6));
 
-                g.DrawLine(penPencil, cx - 4.5f, cy + 4.5f, cx + 4f, cy - 4f);
-                g.DrawLine(penPencil, cx - 3f, cy + 6f, cx + 5.5f, cy - 2.5f);
-                g.FillPolygon(brushTip, new PointF[] {
-                    new PointF(cx - 6f, cy + 6f),
-                    new PointF(cx - 5.5f, cy + 3f),
-                    new PointF(cx - 3f, cy + 5.5f)
-                });
+                PointF tip = new PointF(cx - 6f * z, cy + 6f * z);
+                PointF side1 = new PointF(cx - 6f * z, cy + 2f * z);
+                PointF side2 = new PointF(cx - 2f * z, cy + 6f * z);
+                g.FillPolygon(brushPencil, new PointF[] { tip, side1, side2 });
+
+                PointF top1 = new PointF(cx + 4f * z, cy - 8f * z);
+                PointF top2 = new PointF(cx + 8f * z, cy - 4f * z);
+                g.DrawLine(penPencil, side1, top1);
+                g.DrawLine(penPencil, side2, top2);
+                g.DrawLine(penPencil, top1, top2);
+
+                PointF cap1 = new PointF(cx + 2f * z, cy - 6f * z);
+                PointF cap2 = new PointF(cx + 6f * z, cy - 2f * z);
+                g.DrawLine(penPencil, cap1, cap2);
             }
             else if (actionType == "print") // Icon máy in (In phiếu) căn giữa tuyệt đối
             {
-                using var penPrint = new Pen(Color.FromArgb(22, 163, 74), 1.5f);
+                using var penPrint = new Pen(Color.FromArgb(22, 163, 74), 1.7f * z);
                 using var brushPrint = new SolidBrush(Color.FromArgb(22, 163, 74));
 
                 // Khổ giấy trên
-                g.DrawRectangle(penPrint, cx - 4f, cy - 5.5f, 8f, 3.5f);
+                g.DrawRectangle(penPrint, cx - 4.5f * z, cy - 6.5f * z, 9f * z, 4f * z);
                 // Thân máy in
-                g.DrawRectangle(penPrint, cx - 6.5f, cy - 2f, 13f, 6.5f);
+                g.DrawRectangle(penPrint, cx - 7.5f * z, cy - 2.5f * z, 15f * z, 7.5f * z);
                 // Khe nhả giấy
-                g.DrawLine(penPrint, cx - 4f, cy + 1f, cx + 4f, cy + 1f);
+                g.DrawLine(penPrint, cx - 4.5f * z, cy + 1f * z, cx + 4.5f * z, cy + 1f * z);
                 // Giấy in ra bên dưới
-                g.FillRectangle(brushPrint, cx - 4f, cy + 2.5f, 8f, 3.5f);
+                g.FillRectangle(brushPrint, cx - 4.5f * z, cy + 2.5f * z, 9f * z, 4f * z);
             }
         }
 
@@ -1147,9 +1482,9 @@ namespace CanXeApp
                 if (dgvPhieuCan.Rows[e.RowIndex].DataBoundItem is PhieuCan item)
                 {
                     Rectangle cellBounds = dgvPhieuCan.GetCellDisplayRectangle(e.ColumnIndex, e.RowIndex, false);
-                    int btnW = 28;
-                    int btnH = 24;
-                    int gap = 5;
+                    int btnW = (int)Math.Round(34 * _currentZoom);
+                    int btnH = (int)Math.Round(28 * _currentZoom);
+                    int gap = (int)Math.Round(6 * _currentZoom);
                     int startX = (cellBounds.Width - (btnW * 3 + gap * 2)) / 2;
                     int startY = (cellBounds.Height - btnH) / 2;
 
@@ -1180,9 +1515,9 @@ namespace CanXeApp
             if (e.RowIndex >= 0 && e.ColumnIndex >= 0 && dgvPhieuCan.Columns[e.ColumnIndex].Name == "colAction")
             {
                 Rectangle cellBounds = dgvPhieuCan.GetCellDisplayRectangle(e.ColumnIndex, e.RowIndex, false);
-                int btnW = 28;
-                int btnH = 24;
-                int gap = 5;
+                int btnW = (int)Math.Round(34 * _currentZoom);
+                int btnH = (int)Math.Round(28 * _currentZoom);
+                int gap = (int)Math.Round(6 * _currentZoom);
                 int startX = (cellBounds.Width - (btnW * 3 + gap * 2)) / 2;
                 int startY = (cellBounds.Height - btnH) / 2;
 
@@ -1215,19 +1550,29 @@ namespace CanXeApp
                     {
                         _lastHoveredRow = e.RowIndex;
                         _lastHoveredBtn = btn;
-                        _actionToolTip?.Show(tip, dgvPhieuCan, cellBounds.Left + e.X, cellBounds.Top + e.Y - 22, 1500);
+                        _actionToolTip.Show(tip, dgvPhieuCan, cellBounds.Left + e.X + 12, cellBounds.Top + e.Y + 12, 1500);
                     }
                 }
                 else
                 {
                     dgvPhieuCan.Cursor = Cursors.Default;
-                    _actionToolTip?.Hide(dgvPhieuCan);
-                    _lastHoveredBtn = "";
+                    if (_lastHoveredRow != -1)
+                    {
+                        _lastHoveredRow = -1;
+                        _lastHoveredBtn = "";
+                        _actionToolTip.Hide(dgvPhieuCan);
+                    }
                 }
             }
             else
             {
                 dgvPhieuCan.Cursor = Cursors.Default;
+                if (_lastHoveredRow != -1)
+                {
+                    _lastHoveredRow = -1;
+                    _lastHoveredBtn = "";
+                    _actionToolTip.Hide(dgvPhieuCan);
+                }
             }
         }
 
@@ -1241,6 +1586,11 @@ namespace CanXeApp
 
         private void GetInputData()
         {
+            if (!dtpNgayInPhieu.IsUserModified && (_currentPhieuCan == null || _currentPhieuCan.Id == 0))
+            {
+                dtpNgayInPhieu.Value = DateTime.Now;
+            }
+
             _currentPhieuCan.SoXe = txtSoXe.Text.Trim();
             _currentPhieuCan.LoaiHang = cbLoaiHang.Text.Trim();
             _currentPhieuCan.KhachHang = txtKhachHang.Text.Trim();
@@ -1302,7 +1652,29 @@ namespace CanXeApp
 
             if (item != null)
             {
-                FormEditPhieu editForm = new FormEditPhieu(item, _currentLanguage);
+                // Sao chép đối tượng để nếu người dùng hủy/đóng popup thì không ảnh hưởng đến dữ liệu trong bảng
+                var cloneItem = new PhieuCan
+                {
+                    Id = item.Id,
+                    STT = item.STT,
+                    TramCanName = item.TramCanName,
+                    TramCanAddress = item.TramCanAddress,
+                    TramCanPhone = item.TramCanPhone,
+                    LoaiHang = item.LoaiHang,
+                    KhachHang = item.KhachHang,
+                    SoXe = item.SoXe,
+                    KhoiLuongTong = item.KhoiLuongTong,
+                    KhoiLuongXe = item.KhoiLuongXe,
+                    NgayInPhieu = item.NgayInPhieu,
+                    SoChungTu = item.SoChungTu,
+                    GhiChu = item.GhiChu,
+                    KieuCan = item.KieuCan,
+                    ChuHang = item.ChuHang,
+                    TaiXe = item.TaiXe,
+                    NguoiCan = item.NguoiCan
+                };
+
+                FormEditPhieu editForm = new FormEditPhieu(cloneItem, _currentLanguage, _currentZoom, _dbService);
                 if (editForm.ShowDialog(this) == DialogResult.OK)
                 {
                     if (editForm.IsDeleted)
@@ -1313,6 +1685,10 @@ namespace CanXeApp
                     else
                     {
                         _dbService.SavePhieuCan(editForm.PhieuCanData);
+                        if (editForm.RecordedHistory != null)
+                        {
+                            _dbService.AddPhieuCanHistory(editForm.RecordedHistory);
+                        }
                         if (editForm.IsPrintRequested)
                         {
                             PrintService ps = new PrintService(editForm.PhieuCanData);
@@ -1397,11 +1773,10 @@ namespace CanXeApp
 
             var allTickets = _dbService.GetAllPhieuCan();
             int totalTickets = allTickets.Count(p => p.NgayInPhieu.Year == selectedYear);
-            double totalKg = allTickets.Where(p => p.NgayInPhieu.Year == selectedYear).Sum(p => p.KhoiLuongHang);
 
             string sumText = _currentLanguage == "EN"
-                ? $"Total: {totalTickets} tickets ({totalKg:N0} Kg)"
-                : $"Tổng: {totalTickets} phiếu ({totalKg:N0} Kg)";
+                ? $"Total: {totalTickets} tickets"
+                : $"Tổng: {totalTickets} phiếu";
             lblChartSummary.Text = sumText;
         }
 
@@ -1458,7 +1833,7 @@ namespace CanXeApp
 
             using var penGrid = new Pen(Color.FromArgb(235, 238, 242), 1f) { DashStyle = DashStyle.Dash };
             using var brushText = new SolidBrush(Color.FromArgb(120, 130, 140));
-            using var fontSmall = new Font("Segoe UI", 7.5F);
+            using var fontSmall = new Font("Segoe UI", Math.Max(7f, 9F * _currentZoom));
 
             int gridSteps = 4;
             for (int s = 0; s <= gridSteps; s++)
@@ -1466,14 +1841,14 @@ namespace CanXeApp
                 int val = (maxCount * s) / gridSteps;
                 float y = padTop + chartH - (float)s / gridSteps * chartH;
                 g.DrawLine(penGrid, padLeft, y, width - padRight, y);
-                g.DrawString(val.ToString(), fontSmall, brushText, padLeft - 25, y - 6);
+                g.DrawString(val.ToString(), fontSmall, brushText, padLeft - (int)Math.Round(28 * _currentZoom), y - (int)Math.Round(7 * _currentZoom));
             }
 
             float barSlot = (float)chartW / 12f;
-            float barWidth = Math.Min(barSlot * 0.65f, 26f);
+            float barWidth = Math.Min(barSlot * 0.65f, 28f * _currentZoom);
 
-            using var fontBarVal = new Font("Segoe UI", 8F, FontStyle.Bold);
-            using var fontMonth = new Font("Segoe UI", 8F, FontStyle.Regular);
+            using var fontBarVal = new Font("Segoe UI", Math.Max(7f, 9.5F * _currentZoom), FontStyle.Bold);
+            using var fontMonth = new Font("Segoe UI", Math.Max(7f, 9.5F * _currentZoom), FontStyle.Regular);
 
             int currentMonth = DateTime.Now.Month;
             bool isCurrentYear = (selectedYear == DateTime.Now.Year);
@@ -1531,7 +1906,7 @@ namespace CanXeApp
             if (groups.Count == 0)
             {
                 string emptyMsg = _currentLanguage == "EN" ? "No ticket data for this year." : "Chưa có dữ liệu phiếu cân trong năm này.";
-                using var fontEmpty = new Font("Segoe UI", 10F, FontStyle.Italic);
+                using var fontEmpty = new Font("Segoe UI", Math.Max(8f, 11F * _currentZoom), FontStyle.Italic);
                 using var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
                 g.DrawString(emptyMsg, fontEmpty, Brushes.Gray, new RectangleF(0, 0, width, height), sf);
                 return;
@@ -1547,7 +1922,8 @@ namespace CanXeApp
 
             int availableH = height - padTop - padBottom;
             int rowCount = groups.Count;
-            float rowH = (float)availableH / rowCount;
+            float maxRowH = 52f * _currentZoom;
+            float rowH = Math.Min((float)availableH / Math.Max(rowCount, 1), maxRowH);
 
             Color[] barColors = new Color[]
             {
@@ -1558,38 +1934,509 @@ namespace CanXeApp
                 Color.FromArgb(100, 116, 139) // 5th: Slate
             };
 
-            using var fontName = new Font("Segoe UI", 9.5F, FontStyle.Bold);
-            using var fontVal = new Font("Segoe UI", 8.5F, FontStyle.Regular);
-            using var fontRank = new Font("Segoe UI", 8.5F, FontStyle.Bold);
+            using var fontName = new Font("Segoe UI", Math.Max(8f, 11F * _currentZoom), FontStyle.Bold);
+            using var fontVal = new Font("Segoe UI", Math.Max(7f, 10F * _currentZoom), FontStyle.Regular);
+            using var fontRank = new Font("Segoe UI", Math.Max(7f, 10F * _currentZoom), FontStyle.Bold);
 
             for (int i = 0; i < rowCount; i++)
             {
                 var item = groups[i];
                 float y = padTop + i * rowH;
-                float barMaxW = width - padLeft - padRight - 150;
+                float barMaxW = width - padLeft - padRight - (int)Math.Round(170 * _currentZoom);
                 if (barMaxW < 50) barMaxW = 50;
 
                 float barW = ((float)item.Count / maxCount) * barMaxW;
                 if (barW < 8) barW = 8;
 
-                string rankStr = i == 0 ? "🏆 1." : $"{i + 1}.";
-                g.DrawString(rankStr, fontRank, i == 0 ? Brushes.Goldenrod : Brushes.DimGray, padLeft, y + 2);
-                g.DrawString(item.Name, fontName, Brushes.Black, padLeft + 32, y + 2);
+                // Vẽ số thứ hạng
+                string rankStr = $"{i + 1}.";
+                using var brushRank = new SolidBrush(i == 0 ? Color.FromArgb(217, 119, 6) : Color.FromArgb(100, 116, 139));
+                g.DrawString(rankStr, fontRank, brushRank, padLeft, y + 2);
+                g.DrawString(item.Name, fontName, Brushes.Black, padLeft + (int)Math.Round(26 * _currentZoom), y + 2);
 
-                float barY = y + 22;
-                float barH = Math.Min(rowH - 26, 13f);
-                if (barH < 6) barH = 6;
+                float barY = y + (int)Math.Round(25 * _currentZoom);
+                float barH = 12f * _currentZoom;
 
                 using var brushSlot = new SolidBrush(Color.FromArgb(241, 245, 249));
-                g.FillRectangle(brushSlot, padLeft + 32, barY, barMaxW, barH);
+                g.FillRectangle(brushSlot, padLeft + (int)Math.Round(26 * _currentZoom), barY, barMaxW, barH);
 
                 using var brushFill = new SolidBrush(barColors[i % barColors.Length]);
-                g.FillRectangle(brushFill, padLeft + 32, barY, barW, barH);
+                g.FillRectangle(brushFill, padLeft + (int)Math.Round(26 * _currentZoom), barY, barW, barH);
 
-                string valText = $"{item.Count} phiếu | {item.TotalWeight:N0} Kg";
+                string ticketWord = _currentLanguage == "EN" ? (item.Count > 1 ? "tickets" : "ticket") : "phiếu";
+                string valText = $"{item.Count} {ticketWord} | {item.TotalWeight:N0} Kg";
                 using var brushValText = new SolidBrush(Color.FromArgb(71, 85, 105));
-                g.DrawString(valText, fontVal, brushValText, padLeft + 38 + barMaxW, barY - 2);
+                g.DrawString(valText, fontVal, brushValText, padLeft + (int)Math.Round(32 * _currentZoom) + barMaxW, barY - 2);
             }
+        }
+
+        private void CaptureBaseLayouts()
+        {
+            if (gbInput != null)
+            {
+                foreach (Control c in gbInput.Controls)
+                {
+                    _baseLayouts[c] = new ControlLayoutInfo
+                    {
+                        X = c.Left,
+                        Y = c.Top,
+                        Width = c.Width,
+                        Height = c.Height,
+                        FontSize = c.Font.SizeInPoints,
+                        FontStyle = c.Font.Style,
+                        FontFamily = c.Font.FontFamily.Name
+                    };
+                }
+            }
+
+            if (panelSearch != null)
+            {
+                foreach (Control c in panelSearch.Controls)
+                {
+                    _baseLayouts[c] = new ControlLayoutInfo
+                    {
+                        X = c.Left,
+                        Y = c.Top,
+                        Width = c.Width,
+                        Height = c.Height,
+                        FontSize = c.Font.SizeInPoints,
+                        FontStyle = c.Font.Style,
+                        FontFamily = c.Font.FontFamily.Name
+                    };
+                }
+            }
+
+            if (panelChartHeader != null)
+            {
+                foreach (Control c in panelChartHeader.Controls)
+                {
+                    _baseLayouts[c] = new ControlLayoutInfo
+                    {
+                        X = c.Left,
+                        Y = c.Top,
+                        Width = c.Width,
+                        Height = c.Height,
+                        FontSize = c.Font.SizeInPoints,
+                        FontStyle = c.Font.Style,
+                        FontFamily = c.Font.FontFamily.Name
+                    };
+                }
+            }
+
+            if (lblHeaderTitle != null)
+            {
+                _baseLayouts[lblHeaderTitle] = new ControlLayoutInfo
+                {
+                    X = lblHeaderTitle.Left,
+                    Y = lblHeaderTitle.Top,
+                    Width = lblHeaderTitle.Width,
+                    Height = lblHeaderTitle.Height,
+                    FontSize = lblHeaderTitle.Font.SizeInPoints,
+                    FontStyle = lblHeaderTitle.Font.Style,
+                    FontFamily = lblHeaderTitle.Font.FontFamily.Name
+                };
+            }
+
+            if (lblHeaderSub != null)
+            {
+                _baseLayouts[lblHeaderSub] = new ControlLayoutInfo
+                {
+                    X = lblHeaderSub.Left,
+                    Y = lblHeaderSub.Top,
+                    Width = lblHeaderSub.Width,
+                    Height = lblHeaderSub.Height,
+                    FontSize = lblHeaderSub.Font.SizeInPoints,
+                    FontStyle = lblHeaderSub.Font.Style,
+                    FontFamily = lblHeaderSub.Font.FontFamily.Name
+                };
+            }
+        }
+
+        private void RepositionHeaderControls()
+        {
+            if (panelHeader == null || btnSwitchLang == null) return;
+
+            int rightMargin = 16;
+            int y = Math.Max(8, (panelHeader.Height - btnSwitchLang.Height) / 2);
+
+            btnSwitchLang.Location = new Point(panelHeader.Width - btnSwitchLang.Width - rightMargin, y);
+            if (pnlZoomControls != null)
+            {
+                pnlZoomControls.Location = new Point(btnSwitchLang.Left - pnlZoomControls.Width - 12, y);
+            }
+        }
+
+        private void RepositionSearchFilterControls()
+        {
+            if (panelSearch == null || lblSearch == null || txtSearch == null || chkFilterDate == null ||
+                dtpFilterFrom == null || lblFilterTo == null || dtpFilterTo == null ||
+                btnSearch == null || btnResetFilter == null || btnPrintSelected == null)
+            {
+                return;
+            }
+
+            int pnlH = Math.Max(46, (int)Math.Round(50 * _currentZoom));
+            panelSearch.Height = pnlH;
+            int centerY = pnlH / 2;
+
+            // Scale fonts
+            float fontRegular = Math.Max(8f, 11F * _currentZoom);
+            float fontBtn = Math.Max(8f, 10.5F * _currentZoom);
+
+            lblSearch.Font = new Font("Segoe UI", fontRegular, FontStyle.Regular);
+            txtSearch.Font = new Font("Segoe UI", fontRegular, FontStyle.Regular);
+            chkFilterDate.Font = new Font("Segoe UI", fontRegular, FontStyle.Regular);
+            dtpFilterFrom.Font = new Font("Segoe UI", fontRegular, FontStyle.Regular);
+            lblFilterTo.Font = new Font("Segoe UI", fontRegular, FontStyle.Regular);
+            dtpFilterTo.Font = new Font("Segoe UI", fontRegular, FontStyle.Regular);
+            btnSearch.Font = new Font("Segoe UI", fontBtn, FontStyle.Bold);
+            btnResetFilter.Font = new Font("Segoe UI", fontBtn, FontStyle.Bold);
+            btnPrintSelected.Font = new Font("Segoe UI", fontBtn, FontStyle.Bold);
+
+            // Scale control sizes
+            int ctrlH = Math.Max(30, (int)Math.Round(35 * _currentZoom));
+            txtSearch.Width = (int)Math.Round(145 * _currentZoom);
+
+            dtpFilterFrom.Size = new Size((int)Math.Round(135 * _currentZoom), ctrlH);
+            dtpFilterTo.Size = new Size((int)Math.Round(135 * _currentZoom), ctrlH);
+
+            btnSearch.Size = new Size((int)Math.Round(85 * _currentZoom), ctrlH);
+            btnResetFilter.Size = new Size((int)Math.Round(95 * _currentZoom), ctrlH);
+            btnPrintSelected.Size = new Size((int)Math.Round(210 * _currentZoom), ctrlH);
+
+            // Sequential horizontal positioning and exact vertical centering
+            int curX = (int)Math.Round(8 * _currentZoom);
+
+            lblSearch.Location = new Point(curX, centerY - (lblSearch.Height / 2));
+            curX = lblSearch.Right + (int)Math.Round(5 * _currentZoom);
+
+            txtSearch.Location = new Point(curX, centerY - (txtSearch.Height / 2));
+            curX = txtSearch.Right + (int)Math.Round(12 * _currentZoom);
+
+            chkFilterDate.Location = new Point(curX, centerY - (chkFilterDate.Height / 2));
+            curX = chkFilterDate.Right + (int)Math.Round(5 * _currentZoom);
+
+            dtpFilterFrom.Location = new Point(curX, centerY - (dtpFilterFrom.Height / 2));
+            curX = dtpFilterFrom.Right + (int)Math.Round(6 * _currentZoom);
+
+            lblFilterTo.Location = new Point(curX, centerY - (lblFilterTo.Height / 2));
+            curX = lblFilterTo.Right + (int)Math.Round(6 * _currentZoom);
+
+            dtpFilterTo.Location = new Point(curX, centerY - (dtpFilterTo.Height / 2));
+            curX = dtpFilterTo.Right + (int)Math.Round(10 * _currentZoom);
+
+            btnSearch.Location = new Point(curX, centerY - (btnSearch.Height / 2));
+            curX = btnSearch.Right + (int)Math.Round(8 * _currentZoom);
+
+            btnResetFilter.Location = new Point(curX, centerY - (btnResetFilter.Height / 2));
+
+            // Position btnPrintSelected on the right
+            int rightX = panelSearch.Width - btnPrintSelected.Width - (int)Math.Round(10 * _currentZoom);
+            btnPrintSelected.Location = new Point(Math.Max(btnResetFilter.Right + (int)Math.Round(10 * _currentZoom), rightX), centerY - (btnPrintSelected.Height / 2));
+        }
+
+        private void ToggleChartVisibility()
+        {
+            SetChartVisibility(!_isChartVisible);
+        }
+
+        private void SetChartVisibility(bool visible)
+        {
+            _isChartVisible = visible;
+            if (pnlChartContent != null) pnlChartContent.Visible = visible;
+
+            if (pnlChartWrapper != null)
+            {
+                if (visible)
+                {
+                    pnlChartWrapper.Dock = DockStyle.Fill;
+                    pnlChartWrapper.BringToFront();
+                }
+                else
+                {
+                    pnlChartWrapper.Dock = DockStyle.Top;
+                    pnlChartWrapper.Height = (int)Math.Round(42 * _currentZoom);
+                    pnlChartWrapper.BringToFront();
+                }
+            }
+
+            if (btnToggleChart != null && lblChartTitle != null)
+            {
+                if (visible)
+                {
+                    btnToggleChart.Text = _currentLanguage == "EN" ? "▲ Close" : "▲ Đóng";
+                    btnToggleChart.BackColor = Color.FromArgb(235, 240, 248);
+                    btnToggleChart.ForeColor = Color.FromArgb(70, 85, 105);
+                }
+                else
+                {
+                    btnToggleChart.Text = _currentLanguage == "EN" ? "▼ Open" : "▼ Mở";
+                    btnToggleChart.BackColor = Color.FromArgb(24, 119, 242);
+                    btnToggleChart.ForeColor = Color.White;
+                }
+                btnToggleChart.Location = new Point(lblChartTitle.Right + (int)Math.Round(12 * _currentZoom), (int)Math.Round(5 * _currentZoom));
+            }
+
+            if (visible)
+            {
+                UpdateChartData();
+                pnlChartCanvas?.Invalidate();
+            }
+        }
+
+        private void ZoomIn()
+        {
+            float target = (float)Math.Round(_currentZoom + 0.10f, 2);
+            if (target > 1.50f) target = 1.50f;
+            ApplyZoom(target);
+        }
+
+        private void ZoomOut()
+        {
+            float target = (float)Math.Round(_currentZoom - 0.10f, 2);
+            if (target < 0.80f) target = 0.80f;
+            ApplyZoom(target);
+        }
+
+        private void ZoomReset()
+        {
+            ApplyZoom(1.0f);
+        }
+
+        private void ApplyZoom(float zoom)
+        {
+            _currentZoom = Math.Clamp(zoom, 0.80f, 1.50f);
+            if (btnZoomReset != null)
+            {
+                btnZoomReset.Text = $"{(int)Math.Round(_currentZoom * 100)}%";
+            }
+
+            this.SuspendLayout();
+
+            // 1. Scale Column 0 của tableMainLayout (base = 750F)
+            if (tableMainLayout != null && tableMainLayout.ColumnStyles.Count > 0)
+            {
+                tableMainLayout.ColumnStyles[0].Width = (float)Math.Round(750F * _currentZoom);
+            }
+
+            // 2. Scale gbInput và các control con
+            if (gbInput != null)
+            {
+                gbInput.Height = (int)Math.Round(375 * _currentZoom);
+                gbInput.Font = new Font("Segoe UI", Math.Max(8f, 12F * _currentZoom), FontStyle.Bold);
+
+                foreach (Control c in gbInput.Controls)
+                {
+                    if (_baseLayouts.TryGetValue(c, out var info))
+                    {
+                        int newX = (int)Math.Round(info.X * _currentZoom);
+                        int newY = (int)Math.Round(info.Y * _currentZoom);
+                        int newW = (int)Math.Round(info.Width * _currentZoom);
+                        int newH = (int)Math.Round(info.Height * _currentZoom);
+
+                        c.SetBounds(newX, newY, newW, newH);
+                        float newFontSize = Math.Max(7f, info.FontSize * _currentZoom);
+                        c.Font = new Font(info.FontFamily, newFontSize, info.FontStyle);
+                    }
+                }
+
+                if (lblSoXe != null)
+                {
+                    lblSoXe.Size = new Size((int)Math.Round(140 * _currentZoom), (int)Math.Round(26 * _currentZoom));
+                    lblSoXe.Font = new Font("Segoe UI", Math.Max(7f, 11F * _currentZoom), FontStyle.Regular);
+                    UpdateSoXeLabelPosition(_currentLanguage == "EN" ? "Plate No" : "Số xe",
+                        (int)Math.Round(370 * _currentZoom), (int)Math.Round(32 * _currentZoom));
+                }
+            }
+
+            // 3. Scale panelSearch và các control tìm kiếm
+            if (panelSearch != null)
+            {
+                RepositionSearchFilterControls();
+            }
+
+            // 4. Scale dgvPhieuCan
+            if (dgvPhieuCan != null)
+            {
+                float gridFontSize = Math.Max(8f, 11F * _currentZoom);
+                dgvPhieuCan.Font = new Font("Segoe UI", gridFontSize, FontStyle.Regular);
+                dgvPhieuCan.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", gridFontSize, FontStyle.Bold);
+                dgvPhieuCan.DefaultCellStyle.Font = new Font("Segoe UI", gridFontSize, FontStyle.Regular);
+                dgvPhieuCan.AlternatingRowsDefaultCellStyle.Font = new Font("Segoe UI", gridFontSize, FontStyle.Regular);
+
+                int rowH = (int)Math.Round(38 * _currentZoom);
+                dgvPhieuCan.RowTemplate.Height = rowH;
+                foreach (DataGridViewRow row in dgvPhieuCan.Rows)
+                {
+                    row.Height = rowH;
+                }
+                dgvPhieuCan.ColumnHeadersHeight = (int)Math.Round(40 * _currentZoom);
+
+                var colSel = dgvPhieuCan.Columns["colSelect"];
+                if (colSel != null) colSel.Width = (int)Math.Round(42 * _currentZoom);
+
+                var colStt = dgvPhieuCan.Columns["STT"];
+                if (colStt != null) colStt.Width = (int)Math.Round(72 * _currentZoom);
+
+                var colAct = dgvPhieuCan.Columns["colAction"];
+                if (colAct != null) colAct.Width = (int)Math.Round(135 * _currentZoom);
+            }
+
+            // 5. Scale panelHeader và các nút trong header
+            if (panelHeader != null)
+            {
+                panelHeader.Height = (int)Math.Round(84 * _currentZoom);
+
+                if (lblHeaderTitle != null && _baseLayouts.TryGetValue(lblHeaderTitle, out var titleInfo))
+                {
+                    lblHeaderTitle.Font = new Font(titleInfo.FontFamily, Math.Max(9f, titleInfo.FontSize * _currentZoom), titleInfo.FontStyle);
+                    lblHeaderTitle.Location = new Point((int)Math.Round(titleInfo.X * _currentZoom), (int)Math.Round(titleInfo.Y * _currentZoom));
+                }
+                if (lblHeaderSub != null && _baseLayouts.TryGetValue(lblHeaderSub, out var subInfo))
+                {
+                    lblHeaderSub.Font = new Font(subInfo.FontFamily, Math.Max(7f, subInfo.FontSize * _currentZoom), subInfo.FontStyle);
+                    lblHeaderSub.Location = new Point((int)Math.Round(subInfo.X * _currentZoom), (int)Math.Round(subInfo.Y * _currentZoom));
+                }
+
+                if (btnSwitchLang != null)
+                {
+                    btnSwitchLang.Width = (int)Math.Round(145 * _currentZoom);
+                    btnSwitchLang.Height = (int)Math.Round(38 * _currentZoom);
+                    btnSwitchLang.Font = new Font("Segoe UI", Math.Max(7f, 9.5F * _currentZoom), FontStyle.Bold);
+                }
+
+                if (pnlZoomControls != null && btnZoomOut != null && btnZoomReset != null && btnZoomIn != null)
+                {
+                    int zBtnH = (int)Math.Round(38 * _currentZoom);
+                    btnZoomOut.Width = (int)Math.Round(38 * _currentZoom);
+                    btnZoomOut.Height = zBtnH;
+                    btnZoomOut.Invalidate();
+
+                    btnZoomReset.Width = (int)Math.Round(70 * _currentZoom);
+                    btnZoomReset.Height = zBtnH;
+                    btnZoomReset.Font = new Font("Segoe UI", Math.Max(7f, 9.5F * _currentZoom), FontStyle.Bold);
+
+                    btnZoomIn.Width = (int)Math.Round(38 * _currentZoom);
+                    btnZoomIn.Height = zBtnH;
+                    btnZoomIn.Invalidate();
+
+                    btnZoomOut.Location = new Point(0, 0);
+                    btnZoomReset.Location = new Point(btnZoomOut.Right + (int)Math.Round(4 * _currentZoom), 0);
+                    btnZoomIn.Location = new Point(btnZoomReset.Right + (int)Math.Round(4 * _currentZoom), 0);
+                    pnlZoomControls.Size = new Size(btnZoomIn.Right, zBtnH);
+                }
+
+                RepositionHeaderControls();
+            }
+
+            // 6. Scale Chart wrapper, Title Bar và header biểu đồ
+            if (pnlChartTitleBar != null)
+            {
+                pnlChartTitleBar.Height = (int)Math.Round(40 * _currentZoom);
+            }
+            if (lblChartTitle != null)
+            {
+                lblChartTitle.Font = new Font("Segoe UI", Math.Max(8f, 11.5F * _currentZoom), FontStyle.Bold);
+                lblChartTitle.Location = new Point((int)Math.Round(8 * _currentZoom), (int)Math.Round(8 * _currentZoom));
+            }
+            if (btnToggleChart != null && lblChartTitle != null)
+            {
+                btnToggleChart.Font = new Font("Segoe UI", Math.Max(7f, 9.5F * _currentZoom), FontStyle.Bold);
+                btnToggleChart.Size = new Size((int)Math.Round(85 * _currentZoom), (int)Math.Round(28 * _currentZoom));
+                btnToggleChart.Location = new Point(lblChartTitle.Right + (int)Math.Round(12 * _currentZoom), (int)Math.Round(5 * _currentZoom));
+            }
+            if (pnlChartWrapper != null && !_isChartVisible)
+            {
+                pnlChartWrapper.Height = (int)Math.Round(42 * _currentZoom);
+            }
+            if (panelChartHeader != null)
+            {
+                panelChartHeader.Height = (int)Math.Round(44 * _currentZoom);
+                foreach (Control c in panelChartHeader.Controls)
+                {
+                    if (_baseLayouts.TryGetValue(c, out var info))
+                    {
+                        int newX = (int)Math.Round(info.X * _currentZoom);
+                        int newY = (int)Math.Round(info.Y * _currentZoom);
+                        int newW = (int)Math.Round(info.Width * _currentZoom);
+                        int newH = (int)Math.Round(info.Height * _currentZoom);
+
+                        c.SetBounds(newX, newY, newW, newH);
+                        float newFontSize = Math.Max(7f, info.FontSize * _currentZoom);
+                        c.Font = new Font(info.FontFamily, newFontSize, info.FontStyle);
+                    }
+                }
+            }
+
+            this.ResumeLayout(true);
+            pnlChartCanvas?.Invalidate();
+            if (dgvPhieuCan != null)
+            {
+                dgvPhieuCan.Invalidate(true);
+                dgvPhieuCan.Update();
+            }
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if ((keyData & Keys.Control) == Keys.Control)
+            {
+                Keys keyCode = keyData & Keys.KeyCode;
+                if (keyCode == Keys.Add || keyCode == Keys.Oemplus)
+                {
+                    ZoomIn();
+                    return true;
+                }
+                else if (keyCode == Keys.Subtract || keyCode == Keys.OemMinus)
+                {
+                    ZoomOut();
+                    return true;
+                }
+                else if (keyCode == Keys.D0 || keyCode == Keys.NumPad0)
+                {
+                    ZoomReset();
+                    return true;
+                }
+            }
+
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            if (ModifierKeys == Keys.Control)
+            {
+                if (e.Delta > 0)
+                {
+                    ZoomIn();
+                }
+                else if (e.Delta < 0)
+                {
+                    ZoomOut();
+                }
+                return;
+            }
+
+            base.OnMouseWheel(e);
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (HasUnsavedNewTicket())
+            {
+                string confirmMsg = _currentLanguage == "EN"
+                    ? "You are creating a new ticket with unsaved information. Are you sure you want to close the application?"
+                    : "Bạn đang nhập thông tin phiếu cân mới chưa được lưu lại. Bạn có chắc chắn muốn đóng ứng dụng không?";
+                string confirmTitle = _currentLanguage == "EN" ? "Exit Confirmation" : "Xác nhận đóng ứng dụng";
+
+                if (CustomMessageBox.Show(confirmMsg, confirmTitle, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                {
+                    e.Cancel = true;
+                    return;
+                }
+            }
+
+            base.OnFormClosing(e);
         }
     }
 

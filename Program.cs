@@ -8,7 +8,7 @@ namespace CanXeApp
     internal static class Program
     {
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
             // Cấu hình Culture cho toàn bộ ứng dụng (Threads & UI) sang tiếng Việt (vi-VN)
             CultureInfo viCulture = new CultureInfo("vi-VN");

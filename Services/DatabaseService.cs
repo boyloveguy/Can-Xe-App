@@ -50,6 +50,23 @@ namespace CanXeApp.Services
                 cmdAdd.ExecuteNonQuery();
             }
             catch { }
+
+            string createHistoryTableSql = @"
+                CREATE TABLE IF NOT EXISTS PhieuCanHistory (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    PhieuCanId INTEGER NOT NULL,
+                    STT INTEGER NOT NULL,
+                    ThoiGianThayDoi TEXT NOT NULL,
+                    NguoiThayDoi TEXT,
+                    HanhDong TEXT,
+                    NoiDungThayDoi TEXT NOT NULL,
+                    DuLieuCuJson TEXT,
+                    DuLieuMoiJson TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_phieucanhistory_phieucid ON PhieuCanHistory(PhieuCanId);";
+
+            using var cmdHistory = new SqliteCommand(createHistoryTableSql, connection);
+            cmdHistory.ExecuteNonQuery();
         }
 
         public int GetNextSTT()
@@ -112,10 +129,73 @@ namespace CanXeApp.Services
         {
             using var connection = new SqliteConnection(_connectionString);
             connection.Open();
-            string sql = "DELETE FROM PhieuCan WHERE Id = @Id";
+            string sql = "DELETE FROM PhieuCan WHERE Id = @Id; DELETE FROM PhieuCanHistory WHERE PhieuCanId = @Id;";
             using var command = new SqliteCommand(sql, connection);
             command.Parameters.AddWithValue("@Id", id);
             command.ExecuteNonQuery();
+        }
+
+        public void AddPhieuCanHistory(PhieuCanHistory history)
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            connection.Open();
+            string sql = @"
+                INSERT INTO PhieuCanHistory (PhieuCanId, STT, ThoiGianThayDoi, NguoiThayDoi, HanhDong, NoiDungThayDoi, DuLieuCuJson, DuLieuMoiJson)
+                VALUES (@PhieuCanId, @STT, @ThoiGianThayDoi, @NguoiThayDoi, @HanhDong, @NoiDungThayDoi, @DuLieuCuJson, @DuLieuMoiJson);";
+
+            using var command = new SqliteCommand(sql, connection);
+            command.Parameters.AddWithValue("@PhieuCanId", history.PhieuCanId);
+            command.Parameters.AddWithValue("@STT", history.STT);
+            command.Parameters.AddWithValue("@ThoiGianThayDoi", history.ThoiGianThayDoi.ToString("yyyy-MM-dd HH:mm:ss"));
+            command.Parameters.AddWithValue("@NguoiThayDoi", history.NguoiThayDoi ?? "");
+            command.Parameters.AddWithValue("@HanhDong", history.HanhDong ?? "Chỉnh sửa phiếu");
+            command.Parameters.AddWithValue("@NoiDungThayDoi", history.NoiDungThayDoi ?? "");
+            command.Parameters.AddWithValue("@DuLieuCuJson", history.DuLieuCuJson ?? "");
+            command.Parameters.AddWithValue("@DuLieuMoiJson", history.DuLieuMoiJson ?? "");
+            command.ExecuteNonQuery();
+        }
+
+        public List<PhieuCanHistory> GetHistoryByPhieuCanId(int phieuCanId)
+        {
+            var list = new List<PhieuCanHistory>();
+            using var connection = new SqliteConnection(_connectionString);
+            connection.Open();
+            string sql = "SELECT * FROM PhieuCanHistory WHERE PhieuCanId = @PhieuCanId ORDER BY Id ASC;";
+            using var command = new SqliteCommand(sql, connection);
+            command.Parameters.AddWithValue("@PhieuCanId", phieuCanId);
+
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                string rawDateStr = reader.IsDBNull(reader.GetOrdinal("ThoiGianThayDoi")) ? "" : reader.GetString(reader.GetOrdinal("ThoiGianThayDoi"));
+                DateTime dateVal = DateTime.Now;
+                if (!string.IsNullOrEmpty(rawDateStr)) DateTime.TryParse(rawDateStr, out dateVal);
+
+                list.Add(new PhieuCanHistory
+                {
+                    Id = reader.GetInt32(reader.GetOrdinal("Id")),
+                    PhieuCanId = reader.GetInt32(reader.GetOrdinal("PhieuCanId")),
+                    STT = reader.GetInt32(reader.GetOrdinal("STT")),
+                    ThoiGianThayDoi = dateVal,
+                    NguoiThayDoi = reader.IsDBNull(reader.GetOrdinal("NguoiThayDoi")) ? "" : reader.GetString(reader.GetOrdinal("NguoiThayDoi")),
+                    HanhDong = reader.IsDBNull(reader.GetOrdinal("HanhDong")) ? "" : reader.GetString(reader.GetOrdinal("HanhDong")),
+                    NoiDungThayDoi = reader.IsDBNull(reader.GetOrdinal("NoiDungThayDoi")) ? "" : reader.GetString(reader.GetOrdinal("NoiDungThayDoi")),
+                    DuLieuCuJson = reader.IsDBNull(reader.GetOrdinal("DuLieuCuJson")) ? "" : reader.GetString(reader.GetOrdinal("DuLieuCuJson")),
+                    DuLieuMoiJson = reader.IsDBNull(reader.GetOrdinal("DuLieuMoiJson")) ? "" : reader.GetString(reader.GetOrdinal("DuLieuMoiJson"))
+                });
+            }
+            return list;
+        }
+
+        public int GetHistoryCount(int phieuCanId)
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            connection.Open();
+            string sql = "SELECT COUNT(1) FROM PhieuCanHistory WHERE PhieuCanId = @PhieuCanId;";
+            using var command = new SqliteCommand(sql, connection);
+            command.Parameters.AddWithValue("@PhieuCanId", phieuCanId);
+            var result = command.ExecuteScalar();
+            return result != null && result != DBNull.Value ? Convert.ToInt32(result) : 0;
         }
 
         public List<PhieuCan> GetAllPhieuCan(string keyword = "", DateTime? fromDate = null, DateTime? toDate = null)
@@ -133,12 +213,12 @@ namespace CanXeApp.Services
 
             if (fromDate.HasValue)
             {
-                sql += " AND (date(NgayInPhieu) >= date(@fromDate) OR date(NgayVao) >= date(@fromDate))";
+                sql += " AND date(NgayInPhieu) >= date(@fromDate)";
             }
 
             if (toDate.HasValue)
             {
-                sql += " AND (date(NgayInPhieu) <= date(@toDate) OR date(NgayVao) <= date(@toDate))";
+                sql += " AND date(NgayInPhieu) <= date(@toDate)";
             }
 
             sql += " ORDER BY Id DESC";
@@ -166,7 +246,6 @@ namespace CanXeApp.Services
                 string rawDateStr = "";
                 int dateColIdx = -1;
                 try { dateColIdx = reader.GetOrdinal("NgayInPhieu"); } catch { }
-                if (dateColIdx < 0) { try { dateColIdx = reader.GetOrdinal("NgayVao"); } catch { } }
 
                 if (dateColIdx >= 0 && !reader.IsDBNull(dateColIdx))
                 {
