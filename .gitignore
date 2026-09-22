@@ -13,3 +13,4 @@ obj/
 
 # Inno Setup output
 installer_output/
+*.zip
