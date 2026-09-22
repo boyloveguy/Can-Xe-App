@@ -476,13 +476,16 @@ namespace CanXeApp
             CalculateKLHangRealtime(null, null);
         }
 
-        public bool HasDataChangesExcludingDate()
+        public bool HasUnsavedChanges()
         {
+            if (_isSavedOrDeleted) return false;
+
             if (txtSoXe.Text.Trim() != _origSoXe.Trim()) return true;
             if (cbLoaiHang.Text.Trim() != _origLoaiHang.Trim()) return true;
             if (txtKhachHang.Text.Trim() != _origKhachHang.Trim()) return true;
             if (Math.Abs(numKhoiLuongTong.Value - _origKhoiLuongTong) > 0.001) return true;
             if (Math.Abs(numKhoiLuongXe.Value - _origKhoiLuongXe) > 0.001) return true;
+            if (Math.Abs((dtpNgayInPhieu.Value - _origNgayInPhieu).TotalMinutes) >= 1) return true;
             if (txtSoChungTu.Text.Trim() != _origSoChungTu.Trim()) return true;
             if (txtGhiChu.Text.Trim() != _origGhiChu.Trim()) return true;
             if ((cbKieuCan.SelectedItem?.ToString() ?? "") != _origKieuCan) return true;
@@ -490,28 +493,14 @@ namespace CanXeApp
             return false;
         }
 
-        public bool HasDateManuallyChanged()
-        {
-            return dtpNgayInPhieu.IsUserModified && Math.Abs((dtpNgayInPhieu.Value - _origNgayInPhieu).TotalMinutes) >= 1;
-        }
-
-        public bool HasUnsavedChanges()
-        {
-            if (_isSavedOrDeleted) return false;
-            return HasDataChangesExcludingDate() || HasDateManuallyChanged();
-        }
-
-        private void UpdateDataFromInputs(bool keepCalculatedDate = false)
+        private void UpdateDataFromInputs()
         {
             PhieuCanData.SoXe = txtSoXe.Text.Trim();
             PhieuCanData.LoaiHang = cbLoaiHang.Text.Trim();
             PhieuCanData.KhachHang = txtKhachHang.Text.Trim();
             PhieuCanData.KhoiLuongTong = numKhoiLuongTong.Value;
             PhieuCanData.KhoiLuongXe = numKhoiLuongXe.Value;
-            if (!keepCalculatedDate)
-            {
-                PhieuCanData.NgayInPhieu = dtpNgayInPhieu.Value;
-            }
+            PhieuCanData.NgayInPhieu = dtpNgayInPhieu.Value;
             PhieuCanData.SoChungTu = txtSoChungTu.Text.Trim();
             PhieuCanData.GhiChu = txtGhiChu.Text.Trim();
             PhieuCanData.KieuCan = cbKieuCan.SelectedItem?.ToString() ?? "Cân dịch vụ";
@@ -526,36 +515,11 @@ namespace CanXeApp
                 return false;
             }
 
-            bool hasDataChanges = HasDataChangesExcludingDate();
-            bool isDateChanged = HasDateManuallyChanged();
+            bool hasChanges = HasUnsavedChanges();
 
-            if (hasDataChanges)
-            {
-                // Yêu cầu 1: Khi có thay đổi edit và lưu lại thì update ngày in phiếu là thời gian hiện tại
-                if (!isDateChanged)
-                {
-                    PhieuCanData.NgayInPhieu = DateTime.Now;
-                    dtpNgayInPhieu.Value = PhieuCanData.NgayInPhieu;
-                }
-                else
-                {
-                    // Người dùng chủ động đổi một ngày giờ cụ thể
-                    PhieuCanData.NgayInPhieu = dtpNgayInPhieu.Value;
-                }
-            }
-            else if (isDateChanged)
-            {
-                PhieuCanData.NgayInPhieu = dtpNgayInPhieu.Value;
-            }
-            else
-            {
-                // Yêu cầu 1: Nếu không edit gì mà nhấn lưu thì vẫn giữ thời gian cũ
-                PhieuCanData.NgayInPhieu = _origNgayInPhieu;
-            }
+            UpdateDataFromInputs();
 
-            UpdateDataFromInputs(keepCalculatedDate: true);
-
-            if (hasDataChanges || isDateChanged)
+            if (hasChanges)
             {
                 BuildRecordedHistory();
             }
@@ -657,24 +621,7 @@ namespace CanXeApp
 
         private void BtnPreview_Click(object? sender, EventArgs e)
         {
-            bool hasDataChanges = HasDataChangesExcludingDate();
-            bool isDateChanged = HasDateManuallyChanged();
-
-            if (hasDataChanges && !isDateChanged)
-            {
-                PhieuCanData.NgayInPhieu = DateTime.Now;
-                dtpNgayInPhieu.Value = PhieuCanData.NgayInPhieu;
-            }
-            else if (isDateChanged)
-            {
-                PhieuCanData.NgayInPhieu = dtpNgayInPhieu.Value;
-            }
-            else
-            {
-                PhieuCanData.NgayInPhieu = _origNgayInPhieu;
-            }
-
-            UpdateDataFromInputs(keepCalculatedDate: true);
+            UpdateDataFromInputs();
             PrintService ps = new PrintService(PhieuCanData);
             ps.PrintPreview();
         }

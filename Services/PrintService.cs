@@ -59,8 +59,14 @@ namespace CanXeApp.Services
 
         private void Pd_PrintPage(object sender, PrintPageEventArgs e)
         {
-            Graphics g = e.Graphics;
+            if (e.Graphics != null)
+            {
+                DrawTicket(e.Graphics, e.PageBounds.Width);
+            }
+        }
 
+        public void DrawTicket(Graphics g, float pageWidth)
+        {
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
             // Khung viền kép ngoài (Khổ A4/A5 chiều rộng 710px)
@@ -68,7 +74,6 @@ namespace CanXeApp.Services
             int rectHeight = 490;
 
             // Căn giữa lề 2 bên trái/phải theo chiều rộng trang giấy
-            float pageWidth = e.PageBounds.Width;
             float leftMargin = Math.Max(20f, (pageWidth - rectWidth) / 2f);
             float topMargin = 25f;  // Sát lề trên
 
@@ -84,31 +89,48 @@ namespace CanXeApp.Services
             float startX = leftMargin + 16;
             float currentY = topMargin + 15;
 
-            // Font định dạng - Tăng font-weight rõ nét toàn bộ phiếu
-            Font fontHeaderBold = new Font("Times New Roman", 14.5F, FontStyle.Bold);
+            // 1. Các mục ĐƯỢC IN ĐẬM (Bold) theo yêu cầu:
+            // - Tên trạm cân
+            // - Title "Phiếu Cân Xe"
+            // - Tên loại hàng
+            // - Số của các khối lượng
+            // - Tên kiểu cân
+            // 1. Các mục ĐƯỢC IN ĐẬM (Bold) theo yêu cầu:
+            // - Tên trạm cân
+            // - Title "Phiếu Cân Xe"
+            // - Tên loại hàng
+            // - Số của các khối lượng
+            // - Tên kiểu cân
+            Font fontTramCanBold = new Font("Times New Roman", 15F, FontStyle.Bold);
             Font fontTitle = new Font("Times New Roman", 22F, FontStyle.Bold | FontStyle.Underline);
-            Font fontLabelBold = new Font("Times New Roman", 12.5F, FontStyle.Bold); // Các nhãn đều in đậm rõ nét
-            Font fontSubBold = new Font("Times New Roman", 12F, FontStyle.Bold); // Địa chỉ, SĐT đậm
-            Font fontBold = new Font("Times New Roman", 12.5F, FontStyle.Bold);
+            Font fontLoaiHangBold = new Font("Times New Roman", 14.5F, FontStyle.Bold);
+            Font fontKLBold = new Font("Times New Roman", 16F, FontStyle.Bold);
+            Font fontKieuCanBold = new Font("Times New Roman", 14F, FontStyle.Bold);
 
-            // Font to hơn cho Loại hàng, Khách hàng, Biển số xe và Khối lượng
-            Font fontValueBold = new Font("Times New Roman", 14.5F, FontStyle.Bold); // Loại hàng & Khách hàng to rõ đậm
-            Font fontSoXeBold = new Font("Times New Roman", 19F, FontStyle.Bold);
-            Font fontKLBold = new Font("Times New Roman", 17F, FontStyle.Bold); // Khối lượng to nổi bật
-            Font fontFooterSmallItalic = new Font("Times New Roman", 11F, FontStyle.Bold | FontStyle.Italic);
+            // 2. Tất cả các phần còn lại KHÔNG IN ĐẬM (Regular):
+            Font fontRegularHeader = new Font("Times New Roman", 12F, FontStyle.Regular); // Địa chỉ, SĐT, STT
+            Font fontRegularLabel = new Font("Times New Roman", 13.5F, FontStyle.Regular); // Nhãn tên field: Loại hàng:, Khách hàng:, Số xe:, KL tổng:, KL xe:, KL hàng:, Kg, Ngày in phiếu:, Số chứng từ:, Ghi chú:, Kiểu cân:
+            Font fontRegularValue = new Font("Times New Roman", 13.5F, FontStyle.Regular); // Giá trị Khách hàng, Số chứng từ, Ghi chú
+            Font fontRegularSoXe = new Font("Times New Roman", 16F, FontStyle.Regular); // Biển số xe không in đậm
+            Font fontRegularSign = new Font("Times New Roman", 13F, FontStyle.Regular); // Chủ hàng, Tài xế, Người cân
+            Font fontFooterItalic = new Font("Times New Roman", 11F, FontStyle.Italic); // Dòng cảm ơn
 
-            // Header Trạm Cân & STT (Căn lề phải)
-            g.DrawString(_phieuCan.TramCanName, fontHeaderBold, Brushes.Black, startX, currentY);
+            // Header Trạm Cân (IN ĐẬM) & STT (KHÔNG IN ĐẬM)
+            float headerBaselineY = currentY + GetBaselineOffset(fontTramCanBold, g);
+            DrawTextOnBaseline(g, _phieuCan.TramCanName, fontTramCanBold, Brushes.Black, startX, headerBaselineY);
 
             string sttText = $"STT: Xe {_phieuCan.STT}";
-            SizeF sttSize = g.MeasureString(sttText, fontHeaderBold);
-            g.DrawString(sttText, fontHeaderBold, Brushes.Black, startX + (rectWidth - 32) - sttSize.Width, currentY);
+            SizeF sttSize = g.MeasureString(sttText, fontRegularHeader);
+            DrawTextOnBaseline(g, sttText, fontRegularHeader, Brushes.Black, startX + (rectWidth - 32) - sttSize.Width, headerBaselineY);
             currentY += 24;
 
-            g.DrawString(_phieuCan.TramCanAddress, fontSubBold, Brushes.Black, startX, currentY);
+            // Địa chỉ & SĐT (KHÔNG IN ĐẬM)
+            float addrBaselineY = currentY + GetBaselineOffset(fontRegularHeader, g);
+            DrawTextOnBaseline(g, _phieuCan.TramCanAddress, fontRegularHeader, Brushes.Black, startX, addrBaselineY);
             currentY += 22;
 
-            g.DrawString($"SĐT: {_phieuCan.TramCanPhone}", fontSubBold, Brushes.Black, startX, currentY);
+            float phoneBaselineY = currentY + GetBaselineOffset(fontRegularHeader, g);
+            DrawTextOnBaseline(g, $"SĐT: {_phieuCan.TramCanPhone}", fontRegularHeader, Brushes.Black, startX, phoneBaselineY);
             currentY += 24;
 
             float blockCenterX = startX + ((rectWidth - 32) / 2f);
@@ -117,34 +139,43 @@ namespace CanXeApp.Services
             float col1X = startX + 12;
             float col2CenterX = startX + 230;
             float col3X = startX + 300;
-            float col4X = startX + 375;
+            float col4X = startX + 365;
 
             // Cụm Tiêu đề, Loại hàng, Khách hàng căn giữa so với cột Biển số xe (col2CenterX)
             string titleText = "PHIẾU CÂN XE";
             SizeF titleSize = g.MeasureString(titleText, fontTitle);
-            // Căn tiêu đề có tâm trùng với col2CenterX (hoặc lệch tâm xe hài hòa với nhãn)
             float titleBlockX = col2CenterX - (titleSize.Width / 2) + 20f;
 
-            // 1. Tiêu đề PHIẾU CÂN XE
-            g.DrawString(titleText, fontTitle, Brushes.Black, titleBlockX, currentY);
+            // 1. Tiêu đề PHIẾU CÂN XE (IN ĐẬM)
+            float titleBaselineY = currentY + GetBaselineOffset(fontTitle, g);
+            DrawTextOnBaseline(g, titleText, fontTitle, Brushes.Black, titleBlockX, titleBaselineY);
             currentY += 34;
 
-            // 2. Loại hàng (Căn lề cùng cột với tiêu đề)
-            g.DrawString("Loại hàng:", fontLabelBold, Brushes.Black, titleBlockX, currentY);
-            SizeF szLblLoaiHang = g.MeasureString("Loại hàng:", fontLabelBold);
-            g.DrawString(_phieuCan.LoaiHang, fontValueBold, Brushes.Black, titleBlockX + szLblLoaiHang.Width - 2, currentY - 1);
+            // 2. Loại hàng: nhãn thường, TÊN LOẠI HÀNG IN ĐẬM (ngang hàng trên cùng baseline)
+            float loaiHangBaselineY = currentY + GetBaselineOffset(fontRegularLabel, g);
+            DrawTextOnBaseline(g, "Loại hàng:", fontRegularLabel, Brushes.Black, titleBlockX, loaiHangBaselineY);
+            SizeF szLblLoaiHang = g.MeasureString("Loại hàng:", fontRegularLabel);
+            DrawTextOnBaseline(g, _phieuCan.LoaiHang, fontLoaiHangBold, Brushes.Black, titleBlockX + szLblLoaiHang.Width - 2, loaiHangBaselineY);
             currentY += 25;
 
-            // 3. Khách hàng (Căn lề cùng cột với tiêu đề)
-            g.DrawString("Khách hàng:", fontLabelBold, Brushes.Black, titleBlockX, currentY);
-            SizeF szLblKhachHang = g.MeasureString("Khách hàng:", fontLabelBold);
-            g.DrawString(_phieuCan.KhachHang, fontValueBold, Brushes.Black, titleBlockX + szLblKhachHang.Width - 2, currentY - 1);
+            // 3. Khách hàng: nhãn thường, tên khách hàng thường (KHÔNG IN ĐẬM, ngang hàng)
+            float khachHangBaselineY = currentY + GetBaselineOffset(fontRegularLabel, g);
+            DrawTextOnBaseline(g, "Khách hàng:", fontRegularLabel, Brushes.Black, titleBlockX, khachHangBaselineY);
+            if (!string.IsNullOrEmpty(_phieuCan.KhachHang))
+            {
+                SizeF szLblKhachHang = g.MeasureString("Khách hàng:", fontRegularLabel);
+                DrawTextOnBaseline(g, _phieuCan.KhachHang, fontRegularValue, Brushes.Black, titleBlockX + szLblKhachHang.Width - 2, khachHangBaselineY);
+            }
             currentY += 30;
 
-            // 4. Số xe
-            g.DrawString("Số xe:", fontLabelBold, Brushes.Black, col1X, currentY);
-            SizeF szSoXe = g.MeasureString(_phieuCan.SoXe, fontSoXeBold);
-            g.DrawString(_phieuCan.SoXe, fontSoXeBold, Brushes.Black, col2CenterX - (szSoXe.Width / 2), currentY - 3);
+            // 4. Số xe: nhãn thường, biển số xe thường (KHÔNG IN ĐẬM, ngang hàng)
+            float soXeBaselineY = currentY + GetBaselineOffset(fontRegularLabel, g);
+            DrawTextOnBaseline(g, "Số xe:", fontRegularLabel, Brushes.Black, col1X, soXeBaselineY);
+            if (!string.IsNullOrEmpty(_phieuCan.SoXe))
+            {
+                SizeF szSoXe = g.MeasureString(_phieuCan.SoXe, fontRegularSoXe);
+                DrawTextOnBaseline(g, _phieuCan.SoXe, fontRegularSoXe, Brushes.Black, col2CenterX - (szSoXe.Width / 2), soXeBaselineY);
+            }
             currentY += 28;
 
             // Xử lý giá trị hiển thị khối lượng với dấu chấm ngăn cách hàng nghìn (ví dụ: 5.533)
@@ -157,48 +188,53 @@ namespace CanXeApp.Services
                 strHang = _phieuCan.KhoiLuongHang.ToString("#,##0", deCulture);
             }
 
-            // Khối lượng tổng & Ngày in phiếu
-            g.DrawString("Khối lượng tổng:", fontLabelBold, Brushes.Black, col1X, currentY);
+            // Khối lượng tổng (nhãn thường, SỐ IN ĐẬM, Kg thường, Ngày in thường - TẤT CẢ NẰM NGANG HÀNG TRÊN CÙNG BASELINE)
+            float klTongBaselineY = currentY + GetBaselineOffset(fontRegularLabel, g);
+            DrawTextOnBaseline(g, "Khối lượng tổng:", fontRegularLabel, Brushes.Black, col1X, klTongBaselineY);
             if (!string.IsNullOrEmpty(strTong))
             {
                 SizeF szTong = g.MeasureString(strTong, fontKLBold);
-                g.DrawString(strTong, fontKLBold, Brushes.Black, col2CenterX - (szTong.Width / 2), currentY - 2);
+                DrawTextOnBaseline(g, strTong, fontKLBold, Brushes.Black, col2CenterX - (szTong.Width / 2), klTongBaselineY);
             }
-            g.DrawString("Kg", fontLabelBold, Brushes.Black, col3X, currentY);
-            g.DrawString($"Ngày in phiếu:  {_phieuCan.NgayInPhieu:dd/MM/yyyy HH:mm}", fontLabelBold, Brushes.Black, col4X, currentY);
+            DrawTextOnBaseline(g, "Kg", fontRegularLabel, Brushes.Black, col3X, klTongBaselineY);
+            DrawTextOnBaseline(g, $"Ngày in phiếu:  {_phieuCan.NgayInPhieu:dd/MM/yyyy HH:mm}", fontRegularLabel, Brushes.Black, col4X, klTongBaselineY);
             currentY += 26;
 
-            // Khối lượng xe
-            g.DrawString("Khối lượng xe:", fontLabelBold, Brushes.Black, col1X, currentY);
+            // Khối lượng xe (nhãn thường, SỐ IN ĐẬM, Kg thường - NGANG HÀNG)
+            float klXeBaselineY = currentY + GetBaselineOffset(fontRegularLabel, g);
+            DrawTextOnBaseline(g, "Khối lượng xe:", fontRegularLabel, Brushes.Black, col1X, klXeBaselineY);
             if (!string.IsNullOrEmpty(strXe))
             {
                 SizeF szXe = g.MeasureString(strXe, fontKLBold);
-                g.DrawString(strXe, fontKLBold, Brushes.Black, col2CenterX - (szXe.Width / 2), currentY - 2);
+                DrawTextOnBaseline(g, strXe, fontKLBold, Brushes.Black, col2CenterX - (szXe.Width / 2), klXeBaselineY);
             }
-            g.DrawString("Kg", fontLabelBold, Brushes.Black, col3X, currentY);
+            DrawTextOnBaseline(g, "Kg", fontRegularLabel, Brushes.Black, col3X, klXeBaselineY);
             currentY += 26;
 
-            // Khối lượng hàng
-            g.DrawString("Khối lượng hàng:", fontLabelBold, Brushes.Black, col1X, currentY);
+            // Khối lượng hàng (nhãn thường, SỐ IN ĐẬM, Kg thường - NGANG HÀNG)
+            float klHangBaselineY = currentY + GetBaselineOffset(fontRegularLabel, g);
+            DrawTextOnBaseline(g, "Khối lượng hàng:", fontRegularLabel, Brushes.Black, col1X, klHangBaselineY);
             if (!string.IsNullOrEmpty(strHang))
             {
                 SizeF szHang = g.MeasureString(strHang, fontKLBold);
-                g.DrawString(strHang, fontKLBold, Brushes.Black, col2CenterX - (szHang.Width / 2), currentY - 2);
+                DrawTextOnBaseline(g, strHang, fontKLBold, Brushes.Black, col2CenterX - (szHang.Width / 2), klHangBaselineY);
             }
-            g.DrawString("Kg", fontLabelBold, Brushes.Black, col3X, currentY);
+            DrawTextOnBaseline(g, "Kg", fontRegularLabel, Brushes.Black, col3X, klHangBaselineY);
             currentY += 26;
 
-            // Số chứng từ
-            g.DrawString("Số chứng từ:", fontLabelBold, Brushes.Black, col1X, currentY);
+            // Số chứng từ (nhãn thường, giá trị thường - NGANG HÀNG)
+            float soChungTuBaselineY = currentY + GetBaselineOffset(fontRegularLabel, g);
+            DrawTextOnBaseline(g, "Số chứng từ:", fontRegularLabel, Brushes.Black, col1X, soChungTuBaselineY);
             if (!string.IsNullOrEmpty(_phieuCan.SoChungTu))
             {
-                SizeF szSoChungTu = g.MeasureString(_phieuCan.SoChungTu, fontLabelBold);
-                g.DrawString(_phieuCan.SoChungTu, fontLabelBold, Brushes.Black, col2CenterX - (szSoChungTu.Width / 2), currentY);
+                SizeF szSoChungTu = g.MeasureString(_phieuCan.SoChungTu, fontRegularValue);
+                DrawTextOnBaseline(g, _phieuCan.SoChungTu, fontRegularValue, Brushes.Black, col2CenterX - (szSoChungTu.Width / 2), soChungTuBaselineY);
             }
             currentY += 25;
 
-            // Ghi chú (Căn trái, tự động xuống dòng không bị tràn khung hay đè chữ)
-            g.DrawString("Ghi chú:", fontLabelBold, Brushes.Black, col1X, currentY);
+            // Ghi chú (nhãn thường, giá trị thường)
+            float ghiChuBaselineY = currentY + GetBaselineOffset(fontRegularLabel, g);
+            DrawTextOnBaseline(g, "Ghi chú:", fontRegularLabel, Brushes.Black, col1X, ghiChuBaselineY);
             if (!string.IsNullOrEmpty(_phieuCan.GhiChu))
             {
                 RectangleF rectGhiChu = new RectangleF(startX + 100, currentY, 575, 55);
@@ -208,8 +244,8 @@ namespace CanXeApp.Services
                     LineAlignment = StringAlignment.Near,
                     Trimming = StringTrimming.Word
                 };
-                SizeF measuredSize = g.MeasureString(_phieuCan.GhiChu, fontLabelBold, (int)rectGhiChu.Width, sf);
-                g.DrawString(_phieuCan.GhiChu, fontLabelBold, Brushes.Black, rectGhiChu, sf);
+                SizeF measuredSize = g.MeasureString(_phieuCan.GhiChu, fontRegularValue, (int)rectGhiChu.Width, sf);
+                g.DrawString(_phieuCan.GhiChu, fontRegularValue, Brushes.Black, rectGhiChu, sf);
                 currentY += (float)Math.Max(25, Math.Ceiling(measuredSize.Height));
             }
             else
@@ -217,27 +253,44 @@ namespace CanXeApp.Services
                 currentY += 25;
             }
 
-            // Kiểu cân
-            g.DrawString("Kiểu cân:", fontLabelBold, Brushes.Black, col1X, currentY);
-            SizeF szKieuCan = g.MeasureString(_phieuCan.KieuCan, fontLabelBold);
-            g.DrawString(_phieuCan.KieuCan, fontLabelBold, Brushes.Black, col2CenterX - (szKieuCan.Width / 2), currentY);
+            // Kiểu cân: nhãn thường, TÊN KIỂU CÂN IN ĐẬM - NGANG HÀNG
+            float kieuCanBaselineY = currentY + GetBaselineOffset(fontRegularLabel, g);
+            DrawTextOnBaseline(g, "Kiểu cân:", fontRegularLabel, Brushes.Black, col1X, kieuCanBaselineY);
+            if (!string.IsNullOrEmpty(_phieuCan.KieuCan))
+            {
+                SizeF szKieuCan = g.MeasureString(_phieuCan.KieuCan, fontKieuCanBold);
+                DrawTextOnBaseline(g, _phieuCan.KieuCan, fontKieuCanBold, Brushes.Black, col2CenterX - (szKieuCan.Width / 2), kieuCanBaselineY);
+            }
             currentY += 32;
 
-            // Chữ ký & Value
+            // Chữ ký (KHÔNG IN ĐẬM)
             float chuHangX = startX + 105;
             float taiXeX = startX + 330;
             float nguoiCanX = startX + 550;
 
-            g.DrawString("Chủ hàng", fontBold, Brushes.Black, chuHangX - (g.MeasureString("Chủ hàng", fontBold).Width / 2), currentY);
-            g.DrawString("Tài xế", fontBold, Brushes.Black, taiXeX - (g.MeasureString("Tài xế", fontBold).Width / 2), currentY);
-            g.DrawString("Người cân", fontBold, Brushes.Black, nguoiCanX - (g.MeasureString("Người cân", fontBold).Width / 2), currentY);
+            float signBaselineY = currentY + GetBaselineOffset(fontRegularSign, g);
+            DrawTextOnBaseline(g, "Chủ hàng", fontRegularSign, Brushes.Black, chuHangX - (g.MeasureString("Chủ hàng", fontRegularSign).Width / 2), signBaselineY);
+            DrawTextOnBaseline(g, "Tài xế", fontRegularSign, Brushes.Black, taiXeX - (g.MeasureString("Tài xế", fontRegularSign).Width / 2), signBaselineY);
+            DrawTextOnBaseline(g, "Người cân", fontRegularSign, Brushes.Black, nguoiCanX - (g.MeasureString("Người cân", fontRegularSign).Width / 2), signBaselineY);
 
-            // Dòng text cảm ơn ở đáy phiếu cân
+            // Dòng text cảm ơn ở đáy phiếu cân (Italic, KHÔNG IN ĐẬM)
             string footerText = "* Cảm ơn quý khách đã sử dụng dịch vụ của chúng tôi *";
-            SizeF footerSize = g.MeasureString(footerText, fontFooterSmallItalic);
+            SizeF footerSize = g.MeasureString(footerText, fontFooterItalic);
             float footerX = blockCenterX - (footerSize.Width / 2);
             float bottomY = topMargin + rectHeight - 22;
-            g.DrawString(footerText, fontFooterSmallItalic, Brushes.Black, footerX, bottomY);
+            g.DrawString(footerText, fontFooterItalic, Brushes.Black, footerX, bottomY);
+        }
+
+        private static float GetBaselineOffset(Font font, Graphics g)
+        {
+            float emPixels = font.SizeInPoints * g.DpiY / 72.0f;
+            return emPixels * font.FontFamily.GetCellAscent(font.Style) / font.FontFamily.GetEmHeight(font.Style);
+        }
+
+        private static void DrawTextOnBaseline(Graphics g, string text, Font font, Brush brush, float x, float baselineY)
+        {
+            float y = baselineY - GetBaselineOffset(font, g);
+            g.DrawString(text, font, brush, x, y);
         }
     }
 }
